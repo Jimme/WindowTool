@@ -264,6 +264,7 @@ ShowSettings(*) {
         g.AddButton("xm w110 Default", "保存").OnEvent("Click", (*) => SaveSettings(controls, status))
         g.AddButton("x+10 w130", "恢复默认（未保存）").OnEvent("Click", (*) => FillSettings(DefaultKeys()))
         g.AddButton("x+10 w110", "取消录制").OnEvent("Click", (*) => CancelRecording())
+        g.AddButton("x+10 w150", "管理员自启动…").OnEvent("Click", ShowStartup)
         g.OnEvent("Close", (*) => CloseSettings())
         g.OnEvent("Escape", (*) => CloseSettings())
         WT.settings := g, WT.controls := controls, WT.keyStatus := status

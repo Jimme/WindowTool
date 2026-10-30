@@ -1,4 +1,4 @@
-﻿; SPDX-License-Identifier: GPL-2.0-or-later
+; SPDX-License-Identifier: GPL-2.0-or-later
 ; Copyright (C) 2026 JimmeYoumu
 ; WindowTool is free software: you can redistribute it and/or modify it
 ; under the terms of the GNU General Public License as published by the
@@ -10,13 +10,13 @@
 ; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See LICENSE.
 #Requires AutoHotkey v2.0
 #SingleInstance Off
-;@Ahk2Exe-SetVersion 0.1.0
+;@Ahk2Exe-SetVersion 0.1.1
 ;@Ahk2Exe-SetDescription 窗口小助手
 
 WT_TEST := A_Args.Length && (A_Args[1] = "--test" || A_Args[1] = "--probe"
     || A_Args[1] = "--preview" || A_Args[1] = "--crash-host")
 #Include TrayManager.ahk
-; 窗口小助手 v0.1.0
+; 窗口小助手 v0.1.1
 ; Win+F12：水平、垂直同时居中；重复按下仍保持居中。
 ; Win+F11：上 / 中 / 下循环，水平不动。
 ; Win+F10：左 / 中 / 右循环，垂直不动。
@@ -26,6 +26,10 @@ WT_TEST := A_Args.Length && (A_Args[1] = "--test" || A_Args[1] = "--probe"
 VERT_POSITIONS := [0, 0.5, 1]
 HORIZ_POSITIONS := [0, 0.5, 1]
 SNAP_TOLERANCE := 50
+
+; 提权设置使用独立短进程，不触碰主实例和隐藏窗口记录。
+if A_Args.Length && (A_Args[1] = "--startup-enable" || A_Args[1] = "--startup-disable")
+    StartupHelper()
 
 if WT_TEST && A_Args[1] = "--test" {
     RunSelfTests()

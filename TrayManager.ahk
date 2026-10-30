@@ -1,13 +1,14 @@
 ; SPDX-License-Identifier: GPL-2.0-or-later
 ; Copyright (C) 2026 JimmeYoumu
 ; 托盘与窗口管理。保留原有窗口定位逻辑。
-global WT := {version: "0.1.0", windows: Map(), keys: [], bindings: Map(), nextKeyId: 8192,
+global WT := {version: "0.1.1", windows: Map(), keys: [], bindings: Map(), nextKeyId: 8192,
     gui: 0, list: 0, settings: 0, recorder: 0, warnings: "", summary: 0, snapshot: "",
     recoveryBlocked: false, lastError: "", hooksPaused: false,
     ini: A_ScriptDir "\WindowTool.ini", journal: A_ScriptDir "\WindowTool.hidden",
     log: A_ScriptDir "\WindowTool.log", prop: "Kirara.WindowTool.Hidden.v1",
     title: "Kirara.WindowTool.Manager.v1", mutex: 0, retry: 0, serial: 0}
 #Include Hotkeys.ahk
+#Include Startup.ahk
 
 InitManager() {
     global WT, WT_TEST
@@ -61,6 +62,7 @@ InitManager() {
     A_TrayMenu.Add("窗口管理 / 快捷键设置…", (*) => ShowManager())
     A_TrayMenu.Default := "窗口管理 / 快捷键设置…"
     A_TrayMenu.Add("快捷键设置…", ShowSettings)
+    A_TrayMenu.Add("管理员自启动…", ShowStartup)
     A_TrayMenu.Add("恢复最近收起的窗口", (*) => RestoreLatest())
     A_TrayMenu.Add("恢复全部窗口", (*) => RestoreAll())
     A_TrayMenu.Add()

@@ -131,6 +131,10 @@ RunSelfTests() {
         Assert(ManagerExit("Exit", 0) != 1 && DllCall("IsWindowVisible", "Ptr", hwnd),
             "正常退出恢复窗口", results)
         WT.keys := TestKeys()
+        ShowStartup()
+        Assert(WT.startupStatus.Text != "" && WT.startupEnable.Enabled = !!A_IsCompiled,
+            "自启动状态界面及源码模式限制", results)
+        WT.startupGui.Hide()
         ShowSettings()
         Assert(WT.controls.Length = 10, "全功能设置界面", results)
         c := WT.controls[1]
