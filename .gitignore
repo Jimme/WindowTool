@@ -1,0 +1,28 @@
+# Local builds and historical backups (publish binaries as Release assets).
+/release/
+/build-check/
+/backup-*/
+/.local/
+/*.exe
+/start_wt.bat
+
+# Personal settings, window recovery records, and logs.
+*.ini
+*.ini.tmp
+*.hidden
+*.hidden.tmp
+*.log
+*.log.old
+*.tmp
+
+# Test output is generated; keep the test sources.
+/tests/*
+!/tests/*.ahk
+!/tests/README.md
+
+# Editor and Windows metadata.
+/.vscode/
+/.idea/
+Thumbs.db
+Desktop.ini
+*.lnk
