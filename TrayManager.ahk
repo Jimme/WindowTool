@@ -1,9 +1,9 @@
 ; SPDX-License-Identifier: GPL-2.0-or-later
 ; Copyright (C) 2026 JimmeYoumu
 ; 托盘与窗口管理。保留原有窗口定位逻辑。
-global WT := {version: "0.1.2", windows: Map(), keys: [], configuredKeys: [], keyErrors: Map(), bindings: Map(), nextKeyId: 8192,
+global WT := {version: "0.1.3-alpha.1", windows: Map(), keys: [], configuredKeys: [], keyErrors: Map(), bindings: Map(), nextKeyId: 8192,
     gui: 0, list: 0, settings: 0, recorder: 0, warnings: "", summary: 0, snapshot: "",
-    recoveryBlocked: false, lastError: "", hooksPaused: false, pendingRestore: Map(),
+    recoveryBlocked: false, lastError: "", activeIssues: Map(), hooksPaused: false, pendingRestore: Map(),
     showProcess: true, showTime: true, icons: Map(), imageList: 0, trayReady: false,
     ini: A_ScriptDir "\WindowTool.ini", journal: A_ScriptDir "\WindowTool.hidden",
     log: A_ScriptDir "\WindowTool.log", prop: "Kirara.WindowTool.Hidden.v1",
@@ -11,6 +11,7 @@ global WT := {version: "0.1.2", windows: Map(), keys: [], configuredKeys: [], ke
 #Include Hotkeys.ahk
 #Include Startup.ahk
 #Include Settings.ahk
+#Include Updates.ahk
 
 InitManager() {
     global WT, WT_TEST
@@ -32,7 +33,7 @@ InitManager() {
                 ExitApp()
             Sleep(100)
         }
-        MsgBox("已有 WindowTool 实例，但暂时无法连接。请稍后再次打开。")
+        MsgBox("已有 WindowTool 实例，但暂时无法连接。请稍后再次打开。", "WindowTool")
         ExitApp()
     }
     DetectHiddenWindows(true)
@@ -59,7 +60,7 @@ InitManager() {
         WT.warnings .= "配置读取失败：" e.Message "`n"
         StartKeys(DefaultKeys())
     }
-    A_IconTip := "窗口小助手 v" WT.version
+    A_IconTip := "WindowTool"
     A_TrayMenu.Delete()
     A_TrayMenu.Add("窗口管理…", (*) => ShowManager())
     A_TrayMenu.Default := "窗口管理…"
@@ -224,13 +225,16 @@ HideWindow(hwnd, notify := true) {
         WinHide(target)
         if DllCall("IsWindowVisible", "Ptr", hwnd)
             throw Error("目标窗口拒绝隐藏。")
+        if WT.activeIssues.Has("hide")
+            WT.activeIssues.Delete("hide")
         RefreshManager()
         return true
     } catch Error as e {
         WT.lastError := e.Message
+        WT.activeIssues["hide"] := e.Message
         WTLog("收起失败: " e.Message)
         if notify
-            MsgBox(e.Message)
+            MsgBox(e.Message, "WindowTool")
         return false
     } finally {
         Critical(previousCritical)
@@ -252,6 +256,7 @@ RestoreWindow(hwnd, activate := true) {
     mode := activate ? (DllCall("IsIconic", "Ptr", hwnd) ? 9 : 5) : 8
     if !DllCall("ShowWindowAsync", "Ptr", hwnd, "Int", mode) {
         WT.lastError := "无法发送恢复请求；窗口记录已保留，可稍后重试。"
+        WT.activeIssues["restore:" hwnd] := WT.lastError
         return false
     }
     WT.pendingRestore[hwnd] := {started: A_TickCount, activate: activate}
@@ -262,6 +267,8 @@ RestoreWindow(hwnd, activate := true) {
 
 FinishRestore(hwnd) {
     global WT
+    if WT.activeIssues.Has("restore:" hwnd)
+        WT.activeIssues.Delete("restore:" hwnd)
     if WT.windows.Has(hwnd) {
         if WindowMatches(hwnd, WT.windows[hwnd])
             DllCall("RemoveProp", "Ptr", hwnd, "Str", WT.prop, "Ptr")
@@ -293,6 +300,7 @@ PollRestores() {
     for hwnd in timeout {
         WT.pendingRestore.Delete(hwnd)
         WT.lastError := "窗口恢复超时，可能未响应；恢复记录已保留，可再次尝试。"
+        WT.activeIssues["restore:" hwnd] := WT.lastError
         WTLog(WT.lastError)
     }
     if timeout.Length {
@@ -329,45 +337,65 @@ RestoreAll(activate := false) {
 }
 
 ShowManager(*) {
+    OpenSettings(0)
+}
+
+CreateManagerPage(g) {
     global WT
-    if !WT.gui {
-        WT.gui := Gui(, "窗口小助手 v" WT.version)
-        WT.gui.SetFont("s10", "Microsoft YaHei UI")
-        WT.gui.AddText("w740", "双击恢复窗口；无响应窗口会保留记录，可稍后重试。")
-        WT.list := WT.gui.AddListView("w740 r12 -Multi", ["窗口标题", "窗口句柄", "所属程序", "收起时间"])
+        WT.gui := g
+        WT.list := g.AddListView("x22 y46 w516 h310 -Multi", ["窗口标题", "窗口句柄", "所属程序", "收起时间"])
+        WT.listLayout := ""
         WT.imageList := IL_Create(16)
         WT.list.SetImageList(WT.imageList, 1)
         WT.icons := Map()
-        WT.list.ModifyCol(1, 400), WT.list.ModifyCol(2, 0)
+        WT.list.ModifyCol(1, 280), WT.list.ModifyCol(2, 0)
         ApplyListPreferences()
         WT.list.OnEvent("DoubleClick", (*) => RestoreSelected())
-        WT.gui.AddButton("w130", "恢复选中").OnEvent("Click", (*) => RestoreSelected())
-        WT.gui.AddButton("x+10 w130", "恢复全部").OnEvent("Click", (*) => RestoreAll())
-        WT.gui.AddButton("x+10 w160", "设置…").OnEvent("Click", (*) => OpenSettings(1))
-        WT.summary := WT.gui.AddEdit("xm w740 r4 ReadOnly -Wrap", "")
-        WT.gui.OnEvent("Close", (*) => CloseManager())
-        WT.gui.OnEvent("Escape", (*) => CloseManager())
-    }
-    UpdateSummary()
-    RefreshManager()
-    WT.gui.Show()
+        WT.list.OnEvent("ItemSelect", (*) => UpdateManagerButtons())
+        selected := g.AddButton("x22 y368 w90 h26", "恢复选中")
+        selected.OnEvent("Click", (*) => RestoreSelected())
+        WT.restoreSelectedButton := selected
+        all := g.AddButton("x+8 w90 h26", "恢复全部")
+        all.OnEvent("Click", (*) => RestoreAll())
+        WT.restoreAllButton := all
+        WT.managerHints := Map(WT.list.Hwnd, "list", selected.Hwnd, "selected", all.Hwnd, "all")
+        WT.hoverControl := 0, WT.hoverSince := 0
 }
 
 RefreshManager() {
     global WT
     UpdateTrayActions()
+    UpdateSummary()
     if !WT.list
         return
+    UpdateManagerButtons()
     snapshot := ""
     for hwnd, record in WT.windows
         snapshot .= hwnd "|" record.title "`n"
     if snapshot = WT.snapshot
         return
     WT.snapshot := snapshot
-    selected := WT.list.GetNext()
-    selectedHwnd := selected ? WT.list.GetText(selected, 2) : ""
-    WT.list.Delete()
+    top := SendMessage(0x1027, 0, 0, WT.list.Hwnd) + 1
+    topHwnd := top <= WT.list.GetCount() ? WT.list.GetText(top, 2) : ""
+    row := WT.list.GetCount()
+    while row > 0 {
+        if !WT.windows.Has(Integer(WT.list.GetText(row, 2)))
+            WT.list.Delete(row)
+        row--
+    }
+    rows := Map()
+    Loop WT.list.GetCount()
+        rows[Integer(WT.list.GetText(A_Index, 2))] := A_Index
     for hwnd, record in WT.windows {
+        title := record.title = "" ? "（无标题窗口）" : record.title
+        process := HasProp(record, "process") ? record.process : "未知"
+        time := HasProp(record, "time") ? record.time : "上次运行"
+        if rows.Has(hwnd) {
+            row := rows[hwnd]
+            if WT.list.GetText(row, 1) != title || WT.list.GetText(row, 3) != process || WT.list.GetText(row, 4) != time
+                WT.list.Modify(row, "", title, hwnd, process, time)
+            continue
+        }
         icon := 0
         if HasProp(record, "path") && record.path != "" {
             if !WT.icons.Has(record.path) {
@@ -377,40 +405,83 @@ RefreshManager() {
             }
             icon := WT.icons[record.path]
         }
-        row := WT.list.Add(icon ? "Icon" icon : "", record.title = "" ? "（无标题窗口）" : record.title, hwnd,
-            HasProp(record, "process") ? record.process : "未知", HasProp(record, "time") ? record.time : "上次运行")
-        if hwnd "" = selectedHwnd
-            WT.list.Modify(row, "Select Focus")
+        rows[hwnd] := WT.list.Add(icon ? "Icon" icon : "", title, hwnd, process, time)
     }
+    if topHwnd != "" && rows.Has(Integer(topHwnd)) {
+        delta := rows[Integer(topHwnd)] - 1 - SendMessage(0x1027, 0, 0, WT.list.Hwnd)
+        rect := Buffer(16, 0)
+        if delta && SendMessage(0x100E, 0, rect.Ptr, WT.list.Hwnd)
+            SendMessage(0x1014, 0, delta * (NumGet(rect, 12, "Int") - NumGet(rect, 4, "Int")), WT.list.Hwnd)
+    }
+    UpdateManagerButtons()
+}
+
+UpdateManagerButtons() {
+    global WT
+    if !HasProp(WT, "restoreSelectedButton")
+        return
+    WT.restoreSelectedButton.Enabled := WT.list.GetNext() != 0
+    WT.restoreAllButton.Enabled := WT.windows.Count > 0
 }
 
 RestoreSelected() {
     global WT
     if row := WT.list.GetNext() {
         if !RestoreWindow(Integer(WT.list.GetText(row, 2)))
-            MsgBox("窗口暂时无法恢复，请确认目标程序与 WindowTool 的运行权限，并保留恢复记录。")
+            MsgBox("窗口暂时无法恢复，请确认目标程序与 WindowTool 的运行权限，并保留恢复记录。", "WindowTool")
     }
 }
 
 CloseManager() {
+    CloseSettings()
+}
+
+ManagerHint() {
     global WT
-    WT.gui.Hide()
+    MouseGetPos(, , &window, &control, 2)
+    if window != WT.gui.Hwnd || !WT.managerHints.Has(control) {
+        if WT.hoverControl {
+            ToolTip()
+            WT.hoverControl := 0
+        }
+        return
+    }
+    if control != WT.hoverControl {
+        ToolTip()
+        WT.hoverControl := control, WT.hoverSince := A_TickCount
+        return
+    }
+    if WT.hoverSince = 0 || A_TickCount - WT.hoverSince < 500
+        return
+    switch WT.managerHints[control] {
+        case "list":
+            text := "双击恢复窗口；无响应时保留记录，可稍后重试。"
+        case "selected":
+            text := "恢复列表中选中的窗口；也可双击该行。"
+        case "all":
+            text := "恢复所有已收起的窗口。`n快捷键：" KeyLabel(WT.keys[7])
+        case "settings":
+            text := "自定义快捷键、启动和界面选项。`n快捷键：" KeyLabel(WT.keys[8])
+    }
+    ToolTip(text)
+    WT.hoverSince := 0
 }
 
 UpdateSummary() {
     global WT
     if !WT.summary
         return
-    text := "收起：" KeyLabel(WT.keys[1]) "　恢复：" KeyLabel(WT.keys[2])
-        . "`n管理：" KeyLabel(WT.keys[3]) "　所有功能均可在设置中自定义。"
-    if !A_IsAdmin
-        text .= "`n当前未以管理员运行，部分管理员窗口无法操作。"
-    if WT.warnings != ""
-        text .= "`n" Trim(WT.warnings, "`n")
-    if WT.keyErrors.Count
-        text .= "`n有 " WT.keyErrors.Count " 项快捷键暂不可用，原键位已保留；请到设置查看。"
-    if WT.lastError != ""
-        text .= "`n" WT.lastError
+    text := "已收起 " WT.windows.Count " 个窗口"
+    if WT.pendingRestore.Count
+        text .= "　正在恢复 " WT.pendingRestore.Count " 个"
+    if WT.recoveryBlocked
+        text .= "　恢复记录异常，请到设置查看。"
+    else if WT.activeIssues.Count || WT.warnings != ""
+        text .= "　操作异常，详情见设置 → 状态与诊断。"
+    else if WT.keyErrors.Count
+        text .= "　" WT.keyErrors.Count " 项快捷键不可用，请到设置查看。"
+    else if !A_IsAdmin
+        text .= "　当前为普通权限"
     WT.summary.Text := text
 }
 
@@ -434,6 +505,9 @@ MaintainWindows() {
         }
         for hwnd in stale
             WT.windows.Delete(hwnd)
+        for hwnd in stale
+            if WT.activeIssues.Has("restore:" hwnd)
+                WT.activeIssues.Delete("restore:" hwnd)
         if stale.Length {
             try SaveJournal()
             catch Error as e
@@ -447,9 +521,12 @@ MaintainWindows() {
     }
 }
 
-ManagerExit(reason, code) {
+ManagerExit(reason, code, decision := "") {
     global WT
     CancelRecording()
+    if reason != "Shutdown" && reason != "Logoff" && reason != "Error"
+        if !ConfirmLeaveSettings(decision, "退出")
+            return 1
     RestoreAll()
     ; 退出仅作有界等待，绝不因目标无响应无限阻塞。
     deadline := A_TickCount + 500
@@ -459,7 +536,7 @@ ManagerExit(reason, code) {
     }
     ; 恢复失败时阻止普通退出，保留再次尝试的入口。
     if WT.windows.Count && reason != "Shutdown" && reason != "Logoff" {
-        MsgBox("仍有窗口未能恢复，请先在管理界面恢复后再退出。")
+        MsgBox("仍有窗口未能恢复，请先在管理界面恢复后再退出。", "WindowTool")
         ShowManager()
         return 1
     }
@@ -485,8 +562,16 @@ UpdateTrayActions() {
 ApplyListPreferences() {
     global WT
     if WT.list {
-        WT.list.ModifyCol(3, WT.showProcess ? 190 : 0)
-        WT.list.ModifyCol(4, WT.showTime ? 120 : 0)
+        layout := WT.showProcess ":" WT.showTime
+        if WT.listLayout = layout
+            return
+        WT.listLayout := layout
+        rect := Buffer(16, 0)
+        DllCall("GetClientRect", "Ptr", WT.list.Hwnd, "Ptr", rect)
+        width := Floor(NumGet(rect, 8, "Int") * 96 / A_ScreenDPI) - 4
+        WT.list.ModifyCol(1, Max(100, width - (WT.showProcess ? 166 : 0) - (WT.showTime ? 90 : 0)))
+        WT.list.ModifyCol(3, WT.showProcess ? 166 : 0)
+        WT.list.ModifyCol(4, WT.showTime ? 90 : 0)
     }
 }
 

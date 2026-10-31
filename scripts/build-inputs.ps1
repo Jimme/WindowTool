@@ -1,9 +1,22 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2026 JimmeYoumu
+function Get-ProjectVersion([string]$ProjectRoot) {
+    $entry = Get-Content -LiteralPath (Join-Path $ProjectRoot 'WindowTool.ahk') -Raw
+    $numeric = [regex]::Match($entry, '(?m)^;@Ahk2Exe-SetVersion (\d+\.\d+\.\d+(?:\.\d+)?)\s*$').Groups[1].Value
+    $display = [regex]::Match($entry, '(?m)^;@Ahk2Exe-SetProductVersion (\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?)\s*$').Groups[1].Value
+    if (!$display) { $display = $numeric }
+    if ($display -notmatch '^(\d+\.\d+\.\d+)(?:-(?:alpha|beta|rc)\.([1-9]\d*))?$') { throw 'Invalid release version.' }
+    $expected = $Matches[1]
+    if ($Matches[2]) { $expected += '.' + $Matches[2] }
+    if ($numeric -ne $expected) { throw 'Numeric metadata and display version must match.' }
+    return $display
+}
+
 function Get-BuildInputs([string]$ProjectRoot) {
     $paths = @(Get-ChildItem -LiteralPath $ProjectRoot -Filter '*.ahk' -File)
     $paths += @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'tests') -Filter '*.ahk' -File)
     $paths += @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'scripts') -Filter '*.ps1' -File)
+    $paths += @(Get-Item -LiteralPath (Join-Path $ProjectRoot 'LICENSE'))
     $inputs = [ordered]@{}
     foreach ($file in ($paths | Sort-Object FullName)) {
         $relative = $file.FullName.Substring($ProjectRoot.TrimEnd('\').Length + 1).Replace('\', '/')

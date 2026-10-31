@@ -11,9 +11,8 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 if (!(Test-Path -LiteralPath $AhkPath -PathType Leaf)) { throw "AutoHotkey v2 not found: $AhkPath" }
 $entryPath = Join-Path $projectRoot 'WindowTool.ahk'
-$releaseVersion = [regex]::Match((Get-Content -LiteralPath $entryPath -Raw),
-    '(?m)^;@Ahk2Exe-SetVersion (\d+\.\d+\.\d+)\s*$').Groups[1].Value
-if (!$releaseVersion) { throw 'Version metadata missing.' }
+. (Join-Path $PSScriptRoot 'build-inputs.ps1')
+$releaseVersion = Get-ProjectVersion $projectRoot
 $checkDirectory = Join-Path $projectRoot "build-check\$releaseVersion"
 New-Item -ItemType Directory -Path (Join-Path $checkDirectory 'tests') -Force | Out-Null
 if ($Compiled) {

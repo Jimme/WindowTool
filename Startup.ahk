@@ -78,6 +78,8 @@ StartupLinks(path) {
 }
 
 ConfigureStartup(enable, sid, testName := "") {
+    if StartupIsPreview() && testName = ""
+        throw Error("预览模式不能修改正式自启动任务。")
     if !A_IsAdmin || StartupSID() != sid
         throw Error("请使用当前用户的管理员权限设置，不能改用另一个账户授权。")
     if !A_IsCompiled
@@ -144,7 +146,7 @@ StartupHelper() {
     }
 }
 
-RefreshStartup() {
+RefreshStartup(resetChoice := false) {
     global WT
     try {
         task := StartupTask(StartupFolder(), StartupName(StartupSID()))
@@ -152,19 +154,33 @@ RefreshStartup() {
             StartupOwned(task)
             definition := task.Definition
             issues := StartupIssues(definition, A_ScriptFullPath)
-            WT.startupStatus.Value := (!task.Enabled ? "任务已停用" : issues != "" ? "已配置，但需要处理：" : "已启用，配置检查正常")
-                . "`r`n" issues "`r`n上次运行结果：" StartupResult(task.LastTaskResult)
+            status := !task.Enabled ? "任务已停用" : issues != "" ? "已配置，需要处理" : "已启用，配置检查正常"
+            WT.startupDetails := status
+                . (issues != "" ? "`r`n" RTrim(issues, "`r`n") : "") "`r`n上次运行结果：" StartupResult(task.LastTaskResult)
                 . "`r`n任务路径：" (definition.Actions.Count ? definition.Actions.Item(1).Path : "无执行程序")
-        } else
-            WT.startupStatus.Value := "未配置 WindowTool 管理员自启动任务。"
+            note := issues != "" ? "配置详情请到“状态与诊断”查看。" : "启用后在登录时延迟 10 秒启动。"
+        } else {
+            status := "尚未启用登录启动"
+            note := "启用后在登录时延迟 10 秒启动。"
+            WT.startupDetails := "未配置 WindowTool 管理员自启动任务。"
+        }
         WT.startupBaseline := !!task && task.Enabled
-        WT.startupEnable.Value := WT.startupBaseline
-        WT.startupEnable.Enabled := A_IsCompiled
-        WT.startupRepair.Enabled := A_IsCompiled
-        if !A_IsCompiled
-            WT.startupStatus.Value .= "`r`n源码运行模式仅查看；请从正式安装的 EXE 设置。"
+        if resetChoice
+            WT.startupEnable.Value := WT.startupBaseline
+        WT.startupEnable.Enabled := A_IsCompiled && !StartupIsPreview()
+        WT.startupRepair.Enabled := A_IsCompiled && !StartupIsPreview()
+        if StartupIsPreview() {
+            note := "预览模式只读，不会修改正式自启动。"
+            WT.startupDetails .= "`r`n预览模式禁止修改正式自启动。"
+        }
+        if !A_IsCompiled {
+            note := "源码模式只读；请从安装的 EXE 设置。"
+            WT.startupDetails .= "`r`n源码运行模式仅查看；请从正式安装的 EXE 设置。"
+        }
+        WT.startupStatus.Text := status "`n" note
     } catch Error as e {
-        WT.startupStatus.Text := "无法读取自启动状态：" e.Message
+        WT.startupStatus.Text := "无法读取登录启动状态`n请到“状态与诊断”查看详细原因。"
+        WT.startupDetails := "无法读取自启动状态：" e.Message
         WT.startupEnable.Enabled := false
         WT.startupRepair.Enabled := false
     }
@@ -172,6 +188,8 @@ RefreshStartup() {
 
 ChangeStartup(enable) {
     global WT
+    if StartupIsPreview()
+        return false
     WT.startupEnable.Enabled := false
     WT.startupRepair.Enabled := false
     ok := false
@@ -186,12 +204,20 @@ ChangeStartup(enable) {
                 throw Error("未能完成设置（退出码 " code "）。")
         }
         ok := true
+        if WT.activeIssues.Has("startup")
+            WT.activeIssues.Delete("startup")
     } catch Error as e {
         WT.lastError := StartupErrorText(e)
+        WT.activeIssues["startup"] := WT.lastError
         MsgBox(WT.lastError, "WindowTool", "Icon!")
     }
-    RefreshStartup()
+    RefreshStartup(true)
     return ok
+}
+
+StartupIsPreview() {
+    global WT_TEST
+    return IsSet(WT_TEST) && WT_TEST
 }
 
 StartupIssues(definition, currentPath) {

@@ -162,7 +162,7 @@ RunSelfTests() {
             "正常退出恢复窗口", results)
         WT.keys := TestKeys()
         ShowStartup()
-        Assert(WT.startupStatus.Text != "" && WT.startupEnable.Enabled = !!A_IsCompiled,
+        Assert(WT.startupStatus.Text != "" && !WT.startupEnable.Enabled && !WT.startupRepair.Enabled,
             "自启动状态界面及源码模式限制", results)
         WT.settings.Hide()
         ShowSettings()
@@ -194,7 +194,7 @@ RunSelfTests() {
         RecordKey(ih, 0x1B, 0)
         Assert(!WT.recorder && c.key = "#F9", "Esc 取消录制保留原键", results)
         StartRecording(c)
-        CloseSettings()
+        CloseSettings("Discard")
         Assert(!WT.recorder, "关闭设置停止键盘录制", results)
         ShowSettings()
         StartRecording(c)
@@ -248,19 +248,141 @@ RunSelfTests() {
         Assert(ApplySettings() && IniRead(WT.ini, "Interface", "ShowProcess") = 0
             && !WT.showTime, "统一应用保存列表偏好", results)
         WT.processOption.Value := true
-        CloseSettings()
+        CloseSettings("Discard")
         ShowSettings()
         Assert(!WT.processOption.Value, "取消丢弃未应用的选项", results)
         WT.startupEnable.Enabled := false
         WT.processOption.Value := true, WT.timeOption.Value := true
         Assert(ApplySettings(true) && !DllCall("IsWindowVisible", "Ptr", WT.settings.Hwnd),
             "确定应用后关闭设置", results)
+        OpenSettings(2)
+        WT.controls[4].enabled.Value := false
+        RefreshKeyStates()
+        Assert(WT.controls[4].state.Text = "待停用", "未应用的停用状态", results)
+        WT.controls[4].enabled.Value := true
+        WT.controls[4].key := "^!+F24"
+        RefreshKeyStates()
+        Assert(WT.controls[4].state.Text = "待修改", "未应用的改键状态", results)
+        FillSettings(WT.configuredKeys)
+        choice := WT.startupEnable.Value
+        WT.startupEnable.Value := !choice
+        RefreshStartup()
+        Assert(WT.startupEnable.Value = !choice, "重新检测保留未应用自启选择", results)
+        RefreshStartup(true)
+        OpenSettings(4)
+        Assert(!WT.resetButton.Enabled, "关于页禁用恢复默认", results)
+        OpenSettings(2)
+        Assert(WT.resetButton.Enabled, "配置页可恢复默认", results)
+        WT.controls[4].enabled.Value := false
+        WT.processOption.Value := false
+        ShowManager()
+        Assert(WT.gui.Hwnd = WT.settings.Hwnd && WT.tabs.Value = 1,
+            "窗口管理与设置共用单一窗口", results)
+        Assert(!WT.okButton.Visible && WT.closeButton.Visible && !WT.keyStatus.Visible,
+            "窗口页不显示配置提交按钮", results)
+        OpenSettings(2)
+        Assert(!WT.controls[4].enabled.Value && !WT.processOption.Value,
+            "切换窗口页保留未保存的配置", results)
+        Assert(WT.okButton.Visible && !WT.closeButton.Visible,
+            "配置页恢复应用与取消入口", results)
+        FillSettings(WT.configuredKeys)
+        WT.processOption.Value := WT.showProcess
+        Assert(Throws(ConfigureStartup.Bind(true, "")), "预览入口禁止修改正式自启", results)
+        WT.controls[7].key := ""
+        WT.controls[7].enabled.Value := true
+        RefreshKeyStates()
+        Assert(WT.controls[7].state.Text = "待录制", "勾选空键位提示待录制", results)
+        FillSettings(WT.configuredKeys)
+        WT.processOption.Value := !WT.showProcess
+        ShowManager()
+        Assert(HasUnsavedSettings() && !CloseSettings("Cancel")
+            && DllCall("IsWindowVisible", "Ptr", WT.settings.Hwnd), "取消关闭保留未保存配置", results)
+        Assert(CloseSettings("Save") && WT.showProcess = !!WT.processOption.Value,
+            "关闭时可保存配置", results)
+        OpenSettings(2)
+        WT.controls[7].key := ""
+        WT.controls[7].enabled.Value := true
+        ShowManager()
+        Assert(!CloseSettings("Save") && WT.tabs.Value = 3
+            && InStr(WT.keyStatus.Text, "录制快捷键"), "跨页保存失败保留具体原因", results)
+        FillSettings(WT.configuredKeys)
+        WT.timeOption.Value := !WT.showTime
+        Assert(ManagerExit("Exit", 0, "Cancel") = 1 && HasUnsavedSettings(),
+            "主动退出可取消并保留未保存设置", results)
+        Assert(ConfirmLeaveSettings("Discard") && !HasUnsavedSettings(),
+            "放弃后不会重复提示未保存", results)
+        WT.timeOption.Value := !WT.showTime
+        Assert(ConfirmLeaveSettings("Save") && !HasUnsavedSettings(),
+            "退出与关闭共用保存流程", results)
+        workingDirectory := A_WorkingDir
+        try {
+            SetWorkingDir(A_Temp)
+            Assert(StrLen(ReadLicense()) > 1000, "其他工作目录下可读取许可证", results)
+        } finally {
+            SetWorkingDir(workingDirectory)
+        }
+        OpenSettings(2)
+        WT.keyStatus.Text := "快捷键页测试提示"
+        OpenSettings(3)
+        Assert(!InStr(WT.keyStatus.Text, "快捷键页测试提示"), "诊断页不沿用配置页提示", results)
+        OpenSettings(2)
+        Assert(WT.keyStatus.Text = "快捷键页测试提示", "切回页面保留本页提示", results)
+        ShowLicense()
+        Assert(StrLen(WT.licenseGui["Edit1"].Value) > 1000, "内置许可证可独立查看", results)
+        WT.licenseGui.Hide()
+        Critical("On")
+        actualWindows := WT.windows
+        WT.windows := Map()
+        Loop 40
+            WT.windows[-100000 - A_Index] := {title: "测试窗口 " A_Index}
+        WT.snapshot := ""
+        ShowManager()
+        WT.list.Modify(25, "Select Focus")
+        selectedHandle := Integer(WT.list.GetText(25, 2))
+        SendMessage(0x1013, 24, 0, WT.list.Hwnd)
+        top := SendMessage(0x1027, 0, 0, WT.list.Hwnd)
+        WT.list.ModifyCol(1, 173)
+        WT.windows[selectedHandle].title := "标题已更新"
+        RefreshManager()
+        Assert(WT.list.GetNext() = 25 && WT.list.GetText(25, 1) = "标题已更新",
+            "逐行更新保持选中项", results)
+        Assert(SendMessage(0x1027, 0, 0, WT.list.Hwnd) = top,
+            "标题刷新保持滚动位置", results)
+        Assert(Abs(SendMessage(0x101D, 0, 0, WT.list.Hwnd) - Round(173 * A_ScreenDPI / 96)) <= 1,
+            "列表刷新保持手动列宽", results)
+        WT.windows := actualWindows
+        RefreshManager()
+        Critical("Off")
+        CloseSettings("Discard")
+        ShowManager()
+        Assert(!WT.restoreAllButton.Enabled && !WT.restoreSelectedButton.Enabled,
+            "空列表禁用恢复按钮", results)
+        oldError := WT.lastError
+        WT.lastError := "历史测试错误"
+        WT.activeIssues.Clear()
+        UpdateSummary()
+        Assert(!InStr(WT.summary.Text, "异常"), "历史错误不冒充当前故障", results)
+        WT.activeIssues["restore:0"] := "测试恢复错误"
+        UpdateSummary()
+        Assert(InStr(WT.summary.Text, "异常"), "当前故障显示提醒", results)
+        FinishRestore(0)
+        Assert(!WT.activeIssues.Count && WT.lastError = "历史测试错误",
+            "恢复成功清除故障但保留历史", results)
+        WT.lastError := oldError
+        WT.showProcess := true, WT.showTime := true
+        ApplyListPreferences()
+        WT.showProcess := false, WT.showTime := false
+        ApplyListPreferences()
+        width := SendMessage(0x101D, 0, 0, WT.list.Hwnd)
+        Assert(width > Round(500 * A_ScreenDPI / 96), "隐藏附属列后标题填满", results)
+        WT.showProcess := true, WT.showTime := true
+        ApplyListPreferences()
         A_IconHidden := true
         Assert(!TrayExists() && EnsureTray() && TrayExists(), "检测托盘丢失并重建", results)
         UnregisterKeys()
         InitManager()
         Assert(WT.mutex && TrayExists(), "完整启动初始化", results)
-        CloseSettings()
+        CloseSettings("Discard")
         WT.gui.Hide()
         command := A_IsCompiled ? '"' A_ScriptFullPath '" --probe'
             : '"' A_AhkPath '" "' A_ScriptFullPath '" --probe'
@@ -364,6 +486,7 @@ PreviewTools() {
     InitManager()
     ShowManager()
     ShowSettings()
+    ShowManager()
     SetTimer(PreviewState, 250)
     SetTimer((*) => ExitApp(), -180000)
     Persistent()

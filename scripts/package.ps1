@@ -6,10 +6,11 @@ param()
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $entryText = Get-Content -LiteralPath (Join-Path $projectRoot 'WindowTool.ahk') -Raw
-$releaseVersion = [regex]::Match($entryText, '(?m)^;@Ahk2Exe-SetVersion (\d+\.\d+\.\d+)\s*$').Groups[1].Value
-if (!$releaseVersion) { throw 'Version metadata missing.' }
+. (Join-Path $PSScriptRoot 'build-inputs.ps1')
+$releaseVersion = Get-ProjectVersion $projectRoot
 $releaseDirectory = Join-Path $projectRoot "release\$releaseVersion"
 . (Join-Path $PSScriptRoot 'build-inputs.ps1')
+. (Join-Path $PSScriptRoot 'release-files.ps1')
 Assert-BuildInputs $projectRoot $releaseDirectory
 $sourceDirectory = Join-Path $releaseDirectory 'sources'
 $assetDirectory = Join-Path $projectRoot "release\assets\$releaseVersion"
@@ -47,7 +48,7 @@ $projectSourceZip = Join-Path $assetDirectory "WindowTool-$releaseVersion-source
 & git -C $projectRoot archive --format=zip "--prefix=WindowTool-$releaseVersion/" -o $projectSourceZip HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Project source archive failed.' }
 $binaryZip = Join-Path $assetDirectory "WindowTool-$releaseVersion-windows-x64.zip"
-Compress-Archive -Path (Join-Path $releaseDirectory '*') -DestinationPath $binaryZip -Force
+New-ReleaseArchive $releaseDirectory $binaryZip
 $checksums = foreach ($asset in @($binaryZip, $projectSourceZip)) {
     '{0}  {1}' -f (Get-FileHash -LiteralPath $asset).Hash, (Split-Path $asset -Leaf)
 }

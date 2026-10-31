@@ -10,8 +10,9 @@
 ; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See LICENSE.
 #Requires AutoHotkey v2.0
 #SingleInstance Off
-;@Ahk2Exe-SetVersion 0.1.2
-;@Ahk2Exe-SetDescription 窗口小助手
+;@Ahk2Exe-SetVersion 0.1.3.1
+;@Ahk2Exe-SetProductVersion 0.1.3-alpha.1
+;@Ahk2Exe-SetDescription WindowTool
 
 WT_TEST := A_Args.Length && (A_Args[1] = "--test" || A_Args[1] = "--probe"
     || A_Args[1] = "--preview" || A_Args[1] = "--crash-host")
@@ -121,7 +122,11 @@ PositionWindow(hwnd, mode) {
             default:
                 return
         }
-        WinMove(nx - offsetX, ny - offsetY, , , target)
+        ; 明确禁止改尺寸，避免旧式 DPI 不感知窗口在重传宽高时被放大。
+        ; SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        if !DllCall("User32\SetWindowPos", "Ptr", hwnd, "Ptr", 0,
+            "Int", nx - offsetX, "Int", ny - offsetY, "Int", 0, "Int", 0, "UInt", 0x15)
+            throw OSError()
     } catch TargetError {
         ; 窗口可能在读取或移动前已经关闭。
         return

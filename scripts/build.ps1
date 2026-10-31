@@ -13,12 +13,9 @@ $buildInputs = Get-BuildInputs $projectRoot
 $entryPath = Join-Path $projectRoot 'WindowTool.ahk'
 $entryText = Get-Content -LiteralPath $entryPath -Raw
 $runtimeText = Get-Content -LiteralPath (Join-Path $projectRoot 'TrayManager.ahk') -Raw
-$metadataMatch = [regex]::Match($entryText, '(?m)^;@Ahk2Exe-SetVersion (\d+\.\d+\.\d+)\s*$')
-$runtimeMatch = [regex]::Match($runtimeText, 'version: "(\d+\.\d+\.\d+)"')
-if (!$metadataMatch.Success -or !$runtimeMatch.Success -or $metadataMatch.Groups[1].Value -ne $runtimeMatch.Groups[1].Value) {
-    throw 'Compiler metadata and runtime version must match.'
-}
-$releaseVersion = $metadataMatch.Groups[1].Value
+$releaseVersion = Get-ProjectVersion $projectRoot
+$runtimeVersion = [regex]::Match($runtimeText, 'version: "([^"]+)"').Groups[1].Value
+if ($runtimeVersion -ne $releaseVersion) { throw 'Compiler metadata and runtime version must match.' }
 foreach ($toolPath in @($AhkPath, $CompilerPath)) {
     if (!(Test-Path -LiteralPath $toolPath -PathType Leaf)) { throw "Tool not found: $toolPath" }
 }

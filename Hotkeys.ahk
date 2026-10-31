@@ -280,12 +280,44 @@ FillSettings(keys) {
         c.enabled.Value := c.key != ""
         c.display.Value := KeyLabel(c.key)
     }
+    RefreshKeyStates()
 }
 
-CloseSettings() {
+CloseSettings(decision := "") {
     global WT
     CancelRecording()
+    if !ConfirmLeaveSettings(decision, "关闭")
+        return false
+    SetTimer(ManagerHint, 0)
+    ToolTip()
+    WT.hoverControl := 0, WT.hoverSince := 0
     WT.settings.Hide()
+    return true
+}
+
+ConfirmLeaveSettings(decision := "", action := "退出") {
+    global WT
+    if HasUnsavedSettings() {
+        if decision = ""
+            decision := MsgBox("有尚未保存的设置，是否保存？`n`n是：保存并" action "`n否：放弃修改`n取消：继续编辑", "WindowTool", "YesNoCancel Icon? Default3 Owner" WT.settings.Hwnd)
+        if decision = "Cancel"
+            return false
+        if decision = "Yes" || decision = "Save" {
+            if !ApplySettings() {
+                message := WT.keyStatus.Text
+                OpenSettings(WT.saveFailurePage)
+                WT.keyStatus.Text := message
+                WT.pageMessages[WT.tabs.Value] := message
+                return false
+            }
+        } else {
+            FillSettings(WT.configuredKeys.Length ? WT.configuredKeys : WT.keys)
+            WT.processOption.Value := WT.showProcess
+            WT.timeOption.Value := WT.showTime
+            WT.startupEnable.Value := WT.startupBaseline
+        }
+    }
+    return true
 }
 
 StartRecording(c, *) {
@@ -342,7 +374,8 @@ RecordKey(ih, vk, sc) {
     c.enabled.Value := true
     c.display.Value := KeyLabel(c.key)
     CancelRecording()
-    WT.keyStatus.Text := "已录入 " KeyLabel(c.key) "，点击保存后生效。"
+    RefreshKeyStates()
+    WT.keyStatus.Text := "已录入 " KeyLabel(c.key) "，点击应用后生效。"
 }
 
 RecordKeyUp(ih, vk, sc) {
