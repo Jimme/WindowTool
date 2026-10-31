@@ -10,8 +10,8 @@
 ; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See LICENSE.
 #Requires AutoHotkey v2.0
 #SingleInstance Off
-;@Ahk2Exe-SetVersion 0.1.3.1
-;@Ahk2Exe-SetProductVersion 0.1.3-alpha.1
+;@Ahk2Exe-SetVersion 0.1.3.2
+;@Ahk2Exe-SetProductVersion 0.1.3-alpha.2
 ;@Ahk2Exe-SetDescription WindowTool
 
 WT_TEST := A_Args.Length && (A_Args[1] = "--test" || A_Args[1] = "--probe"
@@ -99,6 +99,8 @@ PositionWindow(hwnd, mode) {
         return
     ; 混合 DPI 显示器下统一使用物理像素，避免与 DWM 的坐标混用。
     previousDpi := DllCall("User32\SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
+    if !previousDpi
+        return
     try {
         target := "ahk_id " hwnd
         className := WinGetClass(target)
@@ -122,10 +124,19 @@ PositionWindow(hwnd, mode) {
             default:
                 return
         }
+        moveX := nx - offsetX, moveY := ny - offsetY
+        context := DllCall("User32\GetWindowDpiAwarenessContext", "Ptr", hwnd, "Ptr")
+        if context {
+            awareness := DllCall("User32\GetAwarenessFromDpiAwarenessContext", "Ptr", context, "Int")
+            if awareness = 0 || awareness = 1
+                ConstrainLegacyOrigin(mode, &moveX, &moveY, L, T)
+        }
+        ; 旧式窗口的不可见外框越过混合 DPI 屏幕分界时，可能触发坐标重缩放。
+        ; 仅约束被定位的轴；外框留在工作区内，可见边缘允许有数像素间隙。
         ; 明确禁止改尺寸，避免旧式 DPI 不感知窗口在重传宽高时被放大。
         ; SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
         if !DllCall("User32\SetWindowPos", "Ptr", hwnd, "Ptr", 0,
-            "Int", nx - offsetX, "Int", ny - offsetY, "Int", 0, "Int", 0, "UInt", 0x15)
+            "Int", moveX, "Int", moveY, "Int", 0, "Int", 0, "UInt", 0x15)
             throw OSError()
     } catch TargetError {
         ; 窗口可能在读取或移动前已经关闭。
@@ -137,4 +148,11 @@ PositionWindow(hwnd, mode) {
         if previousDpi
             DllCall("User32\SetThreadDpiAwarenessContext", "Ptr", previousDpi, "Ptr")
     }
+}
+
+ConstrainLegacyOrigin(mode, &x, &y, left, top) {
+    if mode != "vertical"
+        x := Max(left, x)
+    if mode != "horizontal"
+        y := Max(top, y)
 }

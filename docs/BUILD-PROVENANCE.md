@@ -1,6 +1,6 @@
 # 构建来源与对应源码
 
-当前版本：0.1.3-alpha.1，Windows x64。未修改 AutoHotkey C++ 解释器源码，项目脚本由 Ahk2Exe 嵌入官方运行时。
+当前版本：0.1.3-alpha.2，Windows x64。未修改 AutoHotkey C++ 解释器源码，项目脚本由 Ahk2Exe 嵌入官方运行时。
 
 | 组件 | 使用版本 |
 | --- | --- |

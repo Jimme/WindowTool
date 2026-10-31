@@ -2,6 +2,10 @@
 ; Copyright (C) 2026 JimmeYoumu
 #Requires AutoHotkey v2.0
 #SingleInstance Off
+if A_Args.Length && A_Args[1] = "--legacy"
+    DllCall("SetThreadDpiAwarenessContext", "Ptr", -1, "Ptr")
+else if A_Args.Length && A_Args[1] = "--per-monitor"
+    DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
 g := Gui(, "WindowTool Test Fixture " DllCall("GetCurrentProcessId"))
 g.AddText("w260", "仅用于 WindowTool 的自动验证")
 g.OnEvent("Close", (*) => ExitApp())

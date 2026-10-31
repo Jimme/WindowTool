@@ -54,11 +54,11 @@ RunSelfTests() {
         Assert(NextRatio(2, 0, 1000, [0, 0.5, 1]) = 0.5
             && NextRatio(500, 0, 1000, [0, 0.5, 1]) = 1
             && NextRatio(1000, 0, 1000, [0, 0.5, 1]) = 0, "定位循环三档", results)
-        Loop 2 {
+        Loop 4 {
             runtime := A_IsCompiled ? EnvGet("WINDOWTOOL_AHK") : A_AhkPath
             if runtime = ""
                 runtime := A_ProgramFiles "\AutoHotkey\v2\AutoHotkey64.exe"
-            Run('"' runtime '" "' A_ScriptDir '\tests\Fixture.ahk"', , , &pid)
+            Run('"' runtime '" "' A_ScriptDir '\tests\Fixture.ahk"' (A_Index = 3 ? " --legacy" : A_Index = 4 ? " --per-monitor" : ""), , , &pid)
             hwnd := WinWait("WindowTool Test Fixture " pid, , 10)
             fixtures.Push({pid: pid, hwnd: hwnd})
         }
@@ -71,6 +71,46 @@ RunSelfTests() {
         PositionWindow(hwnd, "center")
         WinGetPos(&cx2, &cy2, , , target)
         Assert(cx2 = cx && cy2 = cy, "重复居中保持位置", results)
+        px := -3, py := 503
+        ConstrainLegacyOrigin("horizontal", &px, &py, 0, 0)
+        Assert(px = 0 && py = 503, "旧式窗口边界约束不改纵坐标", results)
+        px := -1923, py := -5
+        ConstrainLegacyOrigin("vertical", &px, &py, -1920, 0)
+        Assert(px = -1923 && py = 0, "垂直边界约束不改横坐标", results)
+        ConstrainLegacyOrigin("center", &px, &py, -1920, 0)
+        Assert(px = -1920 && py = 0, "负坐标屏幕约束使用实际原点", results)
+        Assert(DllCall("GetAwarenessFromDpiAwarenessContext", "Ptr", DllCall("GetWindowDpiAwarenessContext", "Ptr", fixtures[3].hwnd, "Ptr"), "Int") = 0,
+            "兼容性窗口实际为 DPI 不感知模式", results)
+        Assert(DllCall("GetAwarenessFromDpiAwarenessContext", "Ptr", DllCall("GetWindowDpiAwarenessContext", "Ptr", fixtures[4].hwnd, "Ptr"), "Int") = 2,
+            "现代窗口实际为逐显示器 DPI 模式", results)
+        for fixtureIndex in [1, 3, 4] {
+            testHwnd := fixtures[fixtureIndex].hwnd
+            Loop MonitorGetCount() {
+                monitorIndex := A_Index
+                PlaceFixtureOnMonitor(testHwnd, monitorIndex)
+                PositionWindow(testHwnd, "center")
+                Sleep(80)
+                baseline := PhysicalGeometry(testHwnd)
+                xs := Map(), ys := Map(), stable := true
+                Loop 12 {
+                    PositionWindow(testHwnd, "horizontal")
+                    Sleep(80)
+                    actual := PhysicalGeometry(testHwnd)
+                    stable := stable && actual.y = baseline.y && actual.w = baseline.w && actual.h = baseline.h
+                    xs[actual.x] := true
+                }
+                Assert(stable && xs.Count = 3, "连续水平循环保持纵坐标和尺寸 " fixtureIndex "/" monitorIndex, results)
+                baseline := PhysicalGeometry(testHwnd)
+                Loop 12 {
+                    PositionWindow(testHwnd, "vertical")
+                    Sleep(80)
+                    actual := PhysicalGeometry(testHwnd)
+                    stable := stable && actual.x = baseline.x && actual.w = baseline.w && actual.h = baseline.h
+                    ys[actual.y] := true
+                }
+                Assert(stable && ys.Count = 3, "连续垂直循环保持横坐标和尺寸 " fixtureIndex "/" monitorIndex, results)
+            }
+        }
         Assert(HideWindow(hwnd) && !DllCall("IsWindowVisible", "Ptr", hwnd), "隐藏窗口并写恢复记录", results)
         Assert(!HideWindow(hwnd) && WT.windows.Count = 1, "重复隐藏不覆盖记录", results)
         Assert(HideWindow(fixtures[2].hwnd), "收起第二个窗口", results)
@@ -429,6 +469,30 @@ RunSelfTests() {
         }
     }
     ExitApp(IsSet(failed) ? 1 : 0)
+}
+
+PhysicalGeometry(hwnd) {
+    previous := DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
+    try {
+        WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
+        return {x: x, y: y, w: w, h: h}
+    } finally {
+        DllCall("SetThreadDpiAwarenessContext", "Ptr", previous, "Ptr")
+    }
+}
+
+PlaceFixtureOnMonitor(hwnd, index) {
+    previous := DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
+    try {
+        MonitorGetWorkArea(index, &l, &t, &r, &b)
+        WinGetPos(, , &w, &h, "ahk_id " hwnd)
+        DllCall("SetWindowPos", "Ptr", hwnd, "Ptr", 0,
+            "Int", l + Max(0, (r - l - w) // 2), "Int", t + Max(0, (b - t - h) // 2),
+            "Int", 0, "Int", 0, "UInt", 0x15)
+        Sleep(100)
+    } finally {
+        DllCall("SetThreadDpiAwarenessContext", "Ptr", previous, "Ptr")
+    }
 }
 
 WaitForRestores() {
