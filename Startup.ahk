@@ -139,33 +139,9 @@ StartupHelper() {
         ConfigureStartup(A_Args[1] = "--startup-enable", A_Args[2])
         ExitApp(0)
     } catch Error as e {
-        MsgBox("自启动设置失败：`n" e.Message, "WindowTool", "Iconx")
+        MsgBox(StartupErrorText(e), "WindowTool", "Iconx")
         ExitApp(1)
     }
-}
-
-ShowStartup(*) {
-    global WT
-    if HasProp(WT, "startupGui") && WT.startupGui {
-        WT.startupGui.Show()
-        RefreshStartup()
-        return
-    }
-    g := Gui(, "管理员自启动 — v" WT.version)
-    g.SetFont("s10", "Microsoft YaHei UI")
-    WT.startupStatus := g.AddText("w600 r5", "")
-    g.AddText("w600 r3", "当前程序：" A_ScriptFullPath "`n请从长期安装目录启用；移动程序后需重新启用。")
-    g.AddText("w600 r3", "登录后延迟 10 秒启动。启用需管理员授权，不保存密码。`n匹配的旧启动快捷方式会保留为 .WindowTool-disabled 备份；关闭此选项不会恢复旧自启。")
-    WT.startupEnable := g.AddButton("w170", "启用 / 更新启动路径")
-    WT.startupEnable.OnEvent("Click", (*) => ChangeStartup(true))
-    WT.startupDisable := g.AddButton("x+10 w130", "关闭自启动")
-    WT.startupDisable.OnEvent("Click", (*) => ChangeStartup(false))
-    g.AddButton("x+10 w100", "刷新").OnEvent("Click", (*) => RefreshStartup())
-    g.OnEvent("Close", (*) => g.Hide())
-    g.OnEvent("Escape", (*) => g.Hide())
-    WT.startupGui := g
-    RefreshStartup()
-    g.Show()
 }
 
 RefreshStartup() {
@@ -175,27 +151,30 @@ RefreshStartup() {
         if task {
             StartupOwned(task)
             definition := task.Definition
-            WT.startupStatus.Text := (task.Enabled ? "已启用" : "任务已停用")
-                . "`n任务启动路径：" definition.Actions.Item(1).Path
-                . "`n管理员权限：" (definition.Principal.RunLevel = 1 ? "是" : "否")
-                . "；当前桌面会话：" (definition.Principal.LogonType = 3 ? "是" : "否")
+            issues := StartupIssues(definition, A_ScriptFullPath)
+            WT.startupStatus.Value := (!task.Enabled ? "任务已停用" : issues != "" ? "已配置，但需要处理：" : "已启用，配置检查正常")
+                . "`r`n" issues "`r`n上次运行结果：" StartupResult(task.LastTaskResult)
+                . "`r`n任务路径：" (definition.Actions.Count ? definition.Actions.Item(1).Path : "无执行程序")
         } else
-            WT.startupStatus.Text := "未配置 WindowTool 管理员自启动任务。"
+            WT.startupStatus.Value := "未配置 WindowTool 管理员自启动任务。"
+        WT.startupBaseline := !!task && task.Enabled
+        WT.startupEnable.Value := WT.startupBaseline
         WT.startupEnable.Enabled := A_IsCompiled
-        WT.startupDisable.Enabled := A_IsCompiled && !!task
+        WT.startupRepair.Enabled := A_IsCompiled
         if !A_IsCompiled
-            WT.startupStatus.Text .= "`n源码运行模式仅查看；请从正式安装的 EXE 设置。"
+            WT.startupStatus.Value .= "`r`n源码运行模式仅查看；请从正式安装的 EXE 设置。"
     } catch Error as e {
         WT.startupStatus.Text := "无法读取自启动状态：" e.Message
         WT.startupEnable.Enabled := false
-        WT.startupDisable.Enabled := false
+        WT.startupRepair.Enabled := false
     }
 }
 
 ChangeStartup(enable) {
     global WT
     WT.startupEnable.Enabled := false
-    WT.startupDisable.Enabled := false
+    WT.startupRepair.Enabled := false
+    ok := false
     try {
         sid := StartupSID()
         if A_IsAdmin
@@ -206,7 +185,78 @@ ChangeStartup(enable) {
             if code != 0
                 throw Error("未能完成设置（退出码 " code "）。")
         }
-    } catch Error as e
-        MsgBox("自启动设置未完成：`n" e.Message, "WindowTool", "Icon!")
+        ok := true
+    } catch Error as e {
+        WT.lastError := StartupErrorText(e)
+        MsgBox(WT.lastError, "WindowTool", "Icon!")
+    }
     RefreshStartup()
+    return ok
+}
+
+StartupIssues(definition, currentPath) {
+    issues := ""
+    if definition.Actions.Count != 1 || definition.Actions.Item(1).Type != 0
+        issues .= "执行动作异常。`r`n"
+    else {
+        action := definition.Actions.Item(1)
+        if !FileExist(action.Path)
+            issues .= "启动程序不存在。`r`n"
+        if StrLower(action.Path) != StrLower(currentPath)
+            issues .= "任务指向其他安装路径，可更新为当前路径。`r`n"
+        if action.Arguments != ""
+            issues .= "启动参数与默认配置不同。`r`n"
+        if !DirExist(action.WorkingDirectory)
+            issues .= "工作目录不存在。`r`n"
+    }
+    if definition.Principal.RunLevel != 1 || definition.Principal.LogonType != 3
+        issues .= "未使用交互会话的最高权限。`r`n"
+    validLogon := false
+    expectedSid := StartupSID()
+    if AccountSID(definition.Principal.UserId) != expectedSid
+        issues .= "任务账户不是当前用户。`r`n"
+    for trigger in definition.Triggers {
+        if trigger.Type = 9 && trigger.Enabled && AccountSID(trigger.UserId) = expectedSid
+            validLogon := true
+    }
+    if !validLogon
+        issues .= "缺少有效的用户登录触发器。`r`n"
+    return issues
+}
+
+AccountSID(account) {
+    if RegExMatch(account, "^S-1-\d+(-\d+)+$")
+        return account
+    if account = ""
+        return ""
+    sidSize := 0, domainSize := 0, use := 0
+    DllCall("Advapi32\LookupAccountNameW", "Ptr", 0, "Str", account, "Ptr", 0,
+        "UInt*", &sidSize, "Ptr", 0, "UInt*", &domainSize, "UInt*", &use)
+    if !sidSize
+        return ""
+    sid := Buffer(sidSize), domain := Buffer(Max(2, domainSize * 2)), result := 0
+    if !DllCall("Advapi32\LookupAccountNameW", "Ptr", 0, "Str", account, "Ptr", sid,
+        "UInt*", &sidSize, "Ptr", domain, "UInt*", &domainSize, "UInt*", &use)
+        return ""
+    if !DllCall("Advapi32\ConvertSidToStringSidW", "Ptr", sid, "Ptr*", &result)
+        return ""
+    try return StrGet(result)
+    finally DllCall("LocalFree", "Ptr", result)
+}
+
+StartupResult(code) {
+    switch code {
+        case 0: return "正常结束"
+        case 0x41301: return "正在运行"
+        case 0x41303: return "尚未运行"
+        default: return Format("0x{:08X}（请检查任务计划程序与防护记录）", code & 0xFFFFFFFF)
+    }
+}
+
+StartupErrorText(e) {
+    code := HasProp(e, "Number") ? e.Number & 0xFFFF : 0
+    hint := code = 1223 ? "管理员授权已取消。" : code = 5 || InStr(e.Message, "80070005")
+        ? "权限不足，请使用当前账户的管理员授权。"
+        : "请检查任务计划程序权限和安全软件的具体提示；若提示备份冲突，请先检查现有备份。"
+    return "自启动设置未完成。`n" hint "`n`n详细信息：" e.Message
 }

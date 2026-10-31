@@ -9,6 +9,8 @@ $entryText = Get-Content -LiteralPath (Join-Path $projectRoot 'WindowTool.ahk') 
 $releaseVersion = [regex]::Match($entryText, '(?m)^;@Ahk2Exe-SetVersion (\d+\.\d+\.\d+)\s*$').Groups[1].Value
 if (!$releaseVersion) { throw 'Version metadata missing.' }
 $releaseDirectory = Join-Path $projectRoot "release\$releaseVersion"
+. (Join-Path $PSScriptRoot 'build-inputs.ps1')
+Assert-BuildInputs $projectRoot $releaseDirectory
 $sourceDirectory = Join-Path $releaseDirectory 'sources'
 $assetDirectory = Join-Path $projectRoot "release\assets\$releaseVersion"
 $runtimeSourcePath = Join-Path $sourceDirectory 'AutoHotkey-v2.0.26-source.zip'

@@ -80,6 +80,15 @@ try {
         if FileExist(link) || !FileExist(backup) || !StartupTask(folder, name)
             throw Error("启用与迁移失败")
         ConfigureStartup(true, sid, name)
+        oldXML := folder.GetTask(name).Xml
+        FileCreateShortcut(A_ScriptFullPath, link)
+        rejected := false
+        try ConfigureStartup(true, sid, name)
+        catch
+            rejected := true
+        if !rejected || folder.GetTask(name).Xml != oldXML || !FileExist(link)
+            throw Error("更新失败没有恢复原任务和快捷方式")
+        FileDelete(link)
         ConfigureStartup(false, sid, name)
         created := false
         if StartupTask(folder, name) || FileExist(link) || !FileExist(backup)

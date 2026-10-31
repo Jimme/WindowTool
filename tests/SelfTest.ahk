@@ -75,10 +75,12 @@ RunSelfTests() {
         Assert(!HideWindow(hwnd) && WT.windows.Count = 1, "重复隐藏不覆盖记录", results)
         Assert(HideWindow(fixtures[2].hwnd), "收起第二个窗口", results)
         RestoreLatest()
+        WaitForRestores()
         Assert(DllCall("IsWindowVisible", "Ptr", fixtures[2].hwnd)
             && !DllCall("IsWindowVisible", "Ptr", hwnd), "按收起顺序恢复最近窗口", results)
         WT.windows := Map()
         RecoverWindows()
+        WaitForRestores()
         Assert(DllCall("IsWindowVisible", "Ptr", hwnd) && WT.windows.Count = 0,
             "从磁盘记录恢复", results)
         crashJournal := A_ScriptDir "\tests\crash.hidden"
@@ -100,6 +102,7 @@ RunSelfTests() {
         normalJournal := WT.journal
         WT.journal := crashJournal
         RecoverWindows()
+        WaitForRestores()
         WT.journal := normalJournal
         Assert(DllCall("IsWindowVisible", "Ptr", hwnd), "强制终止进程后仍可恢复窗口", results)
         originalJournal := WT.journal
@@ -116,9 +119,36 @@ RunSelfTests() {
         WinActivate("ahk_id " WT.gui.Hwnd)
         before := WinExist("A")
         RestoreAll(false)
+        WaitForRestores()
         Assert(WinExist("A") = before, "批量恢复不抢焦点", results)
         Assert(WinGetMinMax("ahk_id " fixtures[2].hwnd) = 1, "恢复保持最大化状态", results)
         WinRestore("ahk_id " fixtures[2].hwnd)
+        HideWindow(hwnd)
+        hungReady := A_ScriptDir "\tests\hung-" fixtures[1].pid ".ready"
+        DllCall("PostMessage", "Ptr", hwnd, "UInt", 0x8001, "Ptr", 0, "Ptr", 0)
+        Loop 100 {
+            if FileExist(hungReady)
+                break
+            Sleep(10)
+        }
+        Assert(FileExist(hungReady), "测试窗口进入真实无响应状态", results)
+        started := A_TickCount
+        Assert(RestoreWindow(hwnd, false) && A_TickCount - started < 500,
+            "无响应窗口恢复请求不阻塞主线程", results)
+        HideWindow(fixtures[2].hwnd)
+        RestoreWindow(fixtures[2].hwnd, false)
+        deadline := A_TickCount + 1000
+        while WT.windows.Has(fixtures[2].hwnd) && A_TickCount < deadline {
+            Sleep(20)
+            PollRestores()
+        }
+        Assert(!WT.windows.Has(fixtures[2].hwnd), "一个窗口卡住仍可恢复其他窗口", results)
+        WaitForRestores()
+        Assert(WT.windows.Has(hwnd) && InStr(FileRead(WT.journal), hwnd "|"),
+            "无响应超时保留窗口与磁盘恢复记录", results)
+        Sleep(1700)
+        MaintainWindows()
+        Assert(!WT.windows.Has(hwnd), "目标恢复响应后正常清理记录", results)
         HideWindow(hwnd)
         WT.list.Modify(1, "Select Focus")
         selection := WT.list.GetText(WT.list.GetNext(), 2)
@@ -134,9 +164,18 @@ RunSelfTests() {
         ShowStartup()
         Assert(WT.startupStatus.Text != "" && WT.startupEnable.Enabled = !!A_IsCompiled,
             "自启动状态界面及源码模式限制", results)
-        WT.startupGui.Hide()
+        WT.settings.Hide()
         ShowSettings()
         Assert(WT.controls.Length = 10, "全功能设置界面", results)
+        service := ComObject("Schedule.Service")
+        service.Connect()
+        definition := StartupDefinition(service, StartupSID(), A_IsCompiled ? A_ScriptFullPath : A_AhkPath)
+        path := definition.Actions.Item(1).Path
+        Assert(StartupIssues(definition, path) = "", "正常任务定义通过健康检查", results)
+        definition.Triggers.Item(1).Enabled := false
+        Assert(InStr(StartupIssues(definition, path), "触发器"), "识别已停用登录触发器", results)
+        definition.Actions.Item(1).Path := A_ScriptDir "\does-not-exist.exe"
+        Assert(InStr(StartupIssues(definition, path), "不存在"), "识别失效自启路径", results)
         c := WT.controls[1]
         StartRecording(c)
         ih := WT.recorder.hook
@@ -187,8 +226,35 @@ RunSelfTests() {
         Assert(WT.bindings.Count = 9 && WT.keys[9] = "" && WT.keys[8] != "",
             "单项错误不使所有快捷键失效", results)
         Assert(IniRead(WT.ini, "Hotkeys", "RepairTray") = "invalid-key", "错误配置不被启动静默覆盖", results)
+        Assert(SaveSettings(ControlsFor(WT.configuredKeys), status)
+            && IniRead(WT.ini, "Hotkeys", "RepairTray") = "invalid-key",
+            "保存其他设置保留暂不可用的原键位", results)
+        UnregisterKeys()
+        Assert(DllCall("RegisterHotKey", "Ptr", blocker.Hwnd, "Int", 902,
+            "UInt", 7, "UInt", 0x74), "准备启动时快捷键冲突", results)
+        StartKeys(TestKeys())
+        Assert(WT.keys[5] = "" && WT.configuredKeys[5] = "^!+F5", "运行状态与用户配置分离", results)
+        Assert(SaveSettings(ControlsFor(WT.configuredKeys), status)
+            && IniRead(WT.ini, "Hotkeys", "Vertical") = "^!+F5", "临时冲突后保存不丢配置", results)
+        DllCall("UnregisterHotKey", "Ptr", blocker.Hwnd, "Int", 902)
+        RetryConfiguredKeys()
+        Assert(WT.keys[5] = "^!+F5" && !WT.keyErrors.Count, "释放占用后可重试恢复原快捷键", results)
         controls := ControlsFor(TestKeys())
         SaveSettings(controls, status)
+        ShowSettings()
+        WT.startupEnable.Enabled := false ; 不允许 GUI 应用测试修改正式自启。
+        FillSettings(WT.configuredKeys)
+        WT.processOption.Value := false, WT.timeOption.Value := false
+        Assert(ApplySettings() && IniRead(WT.ini, "Interface", "ShowProcess") = 0
+            && !WT.showTime, "统一应用保存列表偏好", results)
+        WT.processOption.Value := true
+        CloseSettings()
+        ShowSettings()
+        Assert(!WT.processOption.Value, "取消丢弃未应用的选项", results)
+        WT.startupEnable.Enabled := false
+        WT.processOption.Value := true, WT.timeOption.Value := true
+        Assert(ApplySettings(true) && !DllCall("IsWindowVisible", "Ptr", WT.settings.Hwnd),
+            "确定应用后关闭设置", results)
         A_IconHidden := true
         Assert(!TrayExists() && EnsureTray() && TrayExists(), "检测托盘丢失并重建", results)
         UnregisterKeys()
@@ -243,6 +309,15 @@ RunSelfTests() {
     ExitApp(IsSet(failed) ? 1 : 0)
 }
 
+WaitForRestores() {
+    global WT
+    deadline := A_TickCount + 4000
+    while WT.pendingRestore.Count && A_TickCount < deadline {
+        Sleep(20)
+        PollRestores()
+    }
+}
+
 TestKeys() {
     keys := []
     Loop Actions().Length
@@ -283,9 +358,7 @@ PreviewTools() {
     WT.journal := A_ScriptDir "\tests\preview.hidden"
     WT.log := A_ScriptDir "\tests\preview.log"
     WT.prop := "Kirara.WindowTool.Hidden.Test.v1"
-    keys := DefaultKeys()
-    Loop keys.Length - 3
-        keys[A_Index + 3] := ""
+    keys := TestKeys()
     for i, action in Actions()
         IniWrite(keys[i], WT.ini, "Hotkeys", action.name)
     InitManager()

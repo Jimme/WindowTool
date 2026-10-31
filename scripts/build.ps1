@@ -8,6 +8,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
+. (Join-Path $PSScriptRoot 'build-inputs.ps1')
+$buildInputs = Get-BuildInputs $projectRoot
 $entryPath = Join-Path $projectRoot 'WindowTool.ahk'
 $entryText = Get-Content -LiteralPath $entryPath -Raw
 $runtimeText = Get-Content -LiteralPath (Join-Path $projectRoot 'TrayManager.ahk') -Raw
@@ -36,5 +38,12 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'CHANGELOG.md') -Destination $rel
 Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY.md') -Destination $releaseDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot 'third-party') -Destination $releaseDirectory -Recurse -Force
 $binaryHash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash
+if (($buildInputs | ConvertTo-Json -Compress) -ne ((Get-BuildInputs $projectRoot) | ConvertTo-Json -Compress)) {
+    throw 'Source changed during build; rebuild from a stable tree.'
+}
+@{ inputs = $buildInputs; binarySHA256 = $binaryHash;
+    runtimeSHA256 = (Get-FileHash -LiteralPath $AhkPath).Hash;
+    compilerSHA256 = (Get-FileHash -LiteralPath $CompilerPath).Hash } |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $releaseDirectory 'BUILD-INPUTS.json') -Encoding utf8
 Set-Content -LiteralPath (Join-Path $releaseDirectory 'SHA256.txt') -Value "$binaryHash  WindowTool.exe" -Encoding ascii
 Write-Output "Built $releaseVersion : $outputPath"

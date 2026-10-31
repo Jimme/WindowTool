@@ -10,7 +10,7 @@ Actions() {
         {name: "Vertical", label: "窗口上 / 中 / 下", key: "#F11"},
         {name: "Horizontal", label: "窗口左 / 中 / 右", key: "#F10"},
         {name: "RestoreAll", label: "恢复全部窗口", key: ""},
-        {name: "Settings", label: "打开快捷键设置", key: ""},
+        {name: "Settings", label: "打开设置", key: ""},
         {name: "RepairTray", label: "修复托盘图标", key: ""},
         {name: "Exit", label: "退出并恢复窗口", key: ""}]
 }
@@ -155,6 +155,8 @@ StartKeys(requested := unset) {
     global WT
     if !IsSet(requested)
         requested := LoadKeys()
+    WT.configuredKeys := requested.Clone()
+    WT.keyErrors := Map()
     WT.keys := []
     Loop Actions().Length
         WT.keys.Push("")
@@ -163,7 +165,7 @@ StartKeys(requested := unset) {
         candidate := WT.keys.Clone(), candidate[index] := key
         try RegisterKeys(candidate)
         catch Error as e {
-            WT.warnings .= e.Message "`n"
+            WT.keyErrors[index] := e.Message
             WTLog("快捷键停用: " e.Message)
         }
     }
@@ -203,7 +205,7 @@ ExecuteAction(index) {
     }
 }
 
-SaveSettings(controls, status) {
+SaveSettings(controls, status, preferences := unset) {
     global WT
     CancelRecording()
     keys := []
@@ -218,7 +220,25 @@ SaveSettings(controls, status) {
     Critical("On")
     staged := 0
     try {
-        staged := StageKeys(keys)
+        effective := keys.Clone(), errors := Map(), seen := Map()
+        for index, key in keys {
+            if key = ""
+                continue
+            if WT.keyErrors.Has(index) && key = WT.configuredKeys[index] {
+                effective[index] := ""
+                errors[index] := WT.keyErrors[index]
+            }
+            try {
+                signature := ParseKey(key).signature
+                if seen.Has(signature)
+                    throw Error("快捷键重复，请检查 " Actions()[index].label)
+                seen[signature] := index
+            } catch Error as e {
+                if !errors.Has(index) || InStr(e.Message, "快捷键重复")
+                    throw e
+            }
+        }
+        staged := StageKeys(effective)
         ; 保留其他 INI 段，只更新快捷键；写入失败时原注册、原配置均保留。
         temp := WT.ini ".tmp"
         if FileExist(WT.ini)
@@ -227,10 +247,19 @@ SaveSettings(controls, status) {
             FileDelete(temp)
         for index, action in Actions()
             IniWrite(keys[index], temp, "Hotkeys", action.name)
+        if IsSet(preferences) {
+            IniWrite(preferences.process, temp, "Interface", "ShowProcess")
+            IniWrite(preferences.time, temp, "Interface", "ShowTime")
+        }
         FileMove(temp, WT.ini, true)
-        CommitKeys(keys, staged)
+        CommitKeys(effective, staged)
+        WT.configuredKeys := keys.Clone(), WT.keyErrors := errors
+        if IsSet(preferences) {
+            WT.showProcess := preferences.process, WT.showTime := preferences.time
+            ApplyListPreferences()
+        }
         WT.warnings := WT.recoveryBlocked ? "恢复记录读取失败，暂不允许收起新窗口；请保留原记录并检查日志。" : ""
-        status.Text := "已保存并生效。"
+        status.Text := errors.Count ? "已保存；有 " errors.Count " 项快捷键暂不可用，原键位已保留。" : "已保存并生效。"
         UpdateSummary()
         return true
     } catch Error as e {
@@ -241,39 +270,6 @@ SaveSettings(controls, status) {
     } finally {
         Critical(previousCritical)
     }
-}
-
-ShowSettings(*) {
-    global WT
-    if !WT.gui
-        ShowManager()
-    if !WT.settings {
-        g := Gui("+Owner" WT.gui.Hwnd, "快捷键设置 — v" WT.version)
-        g.SetFont("s10", "Microsoft YaHei UI")
-        g.AddText("w620", "点“录制”后按组合键，支持 Tab、CapsLock 和 Win。Esc 取消录制。")
-        controls := []
-        for index, action in Actions() {
-            enabled := g.AddCheckbox("xm w180", action.label)
-            display := g.AddEdit("x+8 w300 ReadOnly", "")
-            button := g.AddButton("x+8 w110", "录制…")
-            c := {enabled: enabled, display: display, button: button, key: ""}
-            controls.Push(c)
-            button.OnEvent("Click", StartRecording.Bind(c))
-        }
-        status := g.AddText("xm w620 r3", "")
-        g.AddButton("xm w110 Default", "保存").OnEvent("Click", (*) => SaveSettings(controls, status))
-        g.AddButton("x+10 w130", "恢复默认（未保存）").OnEvent("Click", (*) => FillSettings(DefaultKeys()))
-        g.AddButton("x+10 w110", "取消录制").OnEvent("Click", (*) => CancelRecording())
-        g.AddButton("x+10 w150", "管理员自启动…").OnEvent("Click", ShowStartup)
-        g.OnEvent("Close", (*) => CloseSettings())
-        g.OnEvent("Escape", (*) => CloseSettings())
-        WT.settings := g, WT.controls := controls, WT.keyStatus := status
-    }
-    CancelRecording()
-    FillSettings(WT.keys)
-    WT.keyStatus.Text := "勾选启用，取消勾选则停用。修改后请保存。`n"
-        . "CapsLock / F12 无法完整检测其他键盘钩子的冲突。"
-    WT.settings.Show()
 }
 
 FillSettings(keys) {
