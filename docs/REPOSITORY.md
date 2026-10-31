@@ -1,8 +1,8 @@
-# GitHub 仓库整理建议
+# 仓库结构与发布
 
 GitHub 没有强制要求所有项目使用同一种目录结构。这个项目先保持简单，源码和构建产物分开即可。
 
-建议提交的目录结构：
+当前提交的目录结构：
 
 ```text
 WindowTool/
@@ -16,6 +16,9 @@ WindowTool/
 ├── WindowTool.ahk
 ├── Hotkeys.ahk
 ├── TrayManager.ahk
+├── Settings.ahk
+├── Startup.ahk
+├── Updates.ahk
 ├── docs/
 ├── scripts/
 ├── tests/                 # 仅测试源码
