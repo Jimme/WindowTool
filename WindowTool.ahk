@@ -10,8 +10,8 @@
 ; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See LICENSE.
 #Requires AutoHotkey v2.0
 #SingleInstance Off
-;@Ahk2Exe-SetVersion 0.1.3.3
-;@Ahk2Exe-SetProductVersion 0.1.3-alpha.3
+;@Ahk2Exe-SetVersion 0.1.3
+;@Ahk2Exe-SetProductVersion 0.1.3
 ;@Ahk2Exe-SetDescription WindowTool
 
 WT_TEST := A_Args.Length && (A_Args[1] = "--test" || A_Args[1] = "--probe"

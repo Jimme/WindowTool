@@ -1,7 +1,7 @@
 ; SPDX-License-Identifier: GPL-2.0-or-later
 ; Copyright (C) 2026 JimmeYoumu
 ; 托盘与窗口管理。保留原有窗口定位逻辑。
-global WT := {version: "0.1.3-alpha.3", windows: Map(), keys: [], configuredKeys: [], keyErrors: Map(), bindings: Map(), nextKeyId: 8192,
+global WT := {version: "0.1.3", windows: Map(), keys: [], configuredKeys: [], keyErrors: Map(), bindings: Map(), nextKeyId: 8192,
     gui: 0, list: 0, settings: 0, recorder: 0, warnings: "", summary: 0, snapshot: "",
     recoveryBlocked: false, lastError: "", activeIssues: Map(), hooksPaused: false, pendingRestore: Map(),
     showProcess: true, showTime: true, icons: Map(), imageList: 0, trayReady: false,
