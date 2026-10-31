@@ -10,8 +10,8 @@
 ; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See LICENSE.
 #Requires AutoHotkey v2.0
 #SingleInstance Off
-;@Ahk2Exe-SetVersion 0.1.3.2
-;@Ahk2Exe-SetProductVersion 0.1.3-alpha.2
+;@Ahk2Exe-SetVersion 0.1.3.3
+;@Ahk2Exe-SetProductVersion 0.1.3-alpha.3
 ;@Ahk2Exe-SetDescription WindowTool
 
 WT_TEST := A_Args.Length && (A_Args[1] = "--test" || A_Args[1] = "--probe"
@@ -71,7 +71,9 @@ GetVisibleRect(hwnd, &x, &y, &w, &h, &offsetX, &offsetY) {
     left := NumGet(rect, 0, "Int"), top := NumGet(rect, 4, "Int")
     width := NumGet(rect, 8, "Int") - left
     height := NumGet(rect, 12, "Int") - top
-    if width <= 0 || height <= 0
+    ; 连续异步移动时，DWM 可能仍返回上一帧的位置，不能把它当作当前边框偏移。
+    if width <= 0 || height <= 0 || left < x || top < y
+        || NumGet(rect, 8, "Int") > x + w || NumGet(rect, 12, "Int") > y + h
         return
     offsetX := left - x, offsetY := top - y
     x := left, y := top, w := width, h := height
@@ -97,16 +99,23 @@ PositionWindow(hwnd, mode) {
     global VERT_POSITIONS, HORIZ_POSITIONS
     if !hwnd
         return
-    ; 混合 DPI 显示器下统一使用物理像素，避免与 DWM 的坐标混用。
-    previousDpi := DllCall("User32\SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
-    if !previousDpi
-        return
+    previousCritical := A_IsCritical
+    Critical("On")
+    previousDpi := 0
     try {
+        ; 所有提前返回和异常均恢复线程 DPI 与 Critical 状态。
+        previousDpi := DllCall("User32\SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
+        if !previousDpi
+            return false
         target := "ahk_id " hwnd
         className := WinGetClass(target)
         if className = "Progman" || className = "WorkerW"
             || className = "Shell_TrayWnd" || className = "Shell_SecondaryTrayWnd"
             return
+        ; 有界检查目标是否响应；在读取位置前完成，避免连续按键读取旧请求的位置。
+        if !DllCall("User32\SendMessageTimeoutW", "Ptr", hwnd, "UInt", 0,
+            "Ptr", 0, "Ptr", 0, "UInt", 0x23, "UInt", 50, "Ptr", 0, "Ptr")
+            return false
         if WinGetMinMax(target) != 0 || !GetWorkArea(hwnd, &L, &T, &R, &B)
             return
         GetVisibleRect(hwnd, &x, &y, &w, &h, &offsetX, &offsetY)
@@ -134,10 +143,15 @@ PositionWindow(hwnd, mode) {
         ; 旧式窗口的不可见外框越过混合 DPI 屏幕分界时，可能触发坐标重缩放。
         ; 仅约束被定位的轴；外框留在工作区内，可见边缘允许有数像素间隙。
         ; 明确禁止改尺寸，避免旧式 DPI 不感知窗口在重传宽高时被放大。
-        ; SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        ; SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
         if !DllCall("User32\SetWindowPos", "Ptr", hwnd, "Ptr", 0,
-            "Int", moveX, "Int", moveY, "Int", 0, "Int", 0, "UInt", 0x15)
+            "Int", moveX, "Int", moveY, "Int", 0, "Int", 0, "UInt", 0x4015)
             throw OSError()
+        ; 最多等待 60ms 确认结果，正常窗口可顺序连按，目标中途卡住也不会无限等待。
+        deadline := A_TickCount + 60
+        while !WindowPositionReady(hwnd, moveX, moveY) && A_TickCount < deadline
+            DllCall("Sleep", "UInt", 1)
+        return true ; 表示请求已提交；60ms 内未确认时不把它当作执行成功。
     } catch TargetError {
         ; 窗口可能在读取或移动前已经关闭。
         return
@@ -147,7 +161,23 @@ PositionWindow(hwnd, mode) {
     } finally {
         if previousDpi
             DllCall("User32\SetThreadDpiAwarenessContext", "Ptr", previousDpi, "Ptr")
+        Critical(previousCritical)
     }
+}
+
+WindowPositionReady(hwnd, x, y) {
+    rect := Buffer(16, 0), frame := Buffer(16, 0)
+    if !DllCall("GetWindowRect", "Ptr", hwnd, "Ptr", rect)
+        return false
+    if Abs(NumGet(rect, 0, "Int") - x) > 1 || Abs(NumGet(rect, 4, "Int") - y) > 1
+        return false
+    if DllCall("Dwmapi\DwmGetWindowAttribute", "Ptr", hwnd, "UInt", 9,
+        "Ptr", frame, "UInt", frame.Size, "Int") != 0
+        return true
+    return NumGet(frame, 0, "Int") >= NumGet(rect, 0, "Int")
+        && NumGet(frame, 4, "Int") >= NumGet(rect, 4, "Int")
+        && NumGet(frame, 8, "Int") <= NumGet(rect, 8, "Int")
+        && NumGet(frame, 12, "Int") <= NumGet(rect, 12, "Int")
 }
 
 ConstrainLegacyOrigin(mode, &x, &y, left, top) {

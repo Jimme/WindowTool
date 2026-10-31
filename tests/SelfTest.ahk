@@ -109,8 +109,32 @@ RunSelfTests() {
                     ys[actual.y] := true
                 }
                 Assert(stable && ys.Count = 3, "连续垂直循环保持横坐标和尺寸 " fixtureIndex "/" monitorIndex, results)
+                baseline := PhysicalGeometry(testHwnd)
+                xs := Map(), stable := true
+                Loop 9 {
+                    PositionWindow(testHwnd, "horizontal")
+                    actual := PhysicalGeometry(testHwnd)
+                    stable := stable && actual.y = baseline.y && actual.w = baseline.w && actual.h = baseline.h
+                    xs[actual.x] := true
+                }
+                Assert(stable && xs.Count = 3, "无间隔水平连按不乱序 " fixtureIndex "/" monitorIndex, results)
+                baseline := PhysicalGeometry(testHwnd)
+                ys := Map()
+                Loop 9 {
+                    PositionWindow(testHwnd, "vertical")
+                    actual := PhysicalGeometry(testHwnd)
+                    stable := stable && actual.x = baseline.x && actual.w = baseline.w && actual.h = baseline.h
+                    ys[actual.y] := true
+                }
+                Assert(stable && ys.Count = 3, "无间隔垂直连按不乱序 " fixtureIndex "/" monitorIndex, results)
             }
         }
+        closingHwnd := fixtures[4].hwnd
+        SendMessage(0x8002, 0, 0, , "ahk_id " closingHwnd)
+        started := A_TickCount
+        PositionWindow(closingHwnd, "center")
+        Assert(A_TickCount - started < 250 && WinWaitClose("ahk_id " closingHwnd, , 1),
+            "定位途中目标关闭不会卡住或报错", results)
         Assert(HideWindow(hwnd) && !DllCall("IsWindowVisible", "Ptr", hwnd), "隐藏窗口并写恢复记录", results)
         Assert(!HideWindow(hwnd) && WT.windows.Count = 1, "重复隐藏不覆盖记录", results)
         Assert(HideWindow(fixtures[2].hwnd), "收起第二个窗口", results)
@@ -165,6 +189,8 @@ RunSelfTests() {
         WinRestore("ahk_id " fixtures[2].hwnd)
         HideWindow(hwnd)
         hungReady := A_ScriptDir "\tests\hung-" fixtures[1].pid ".ready"
+        if FileExist(hungReady)
+            FileDelete(hungReady)
         DllCall("PostMessage", "Ptr", hwnd, "UInt", 0x8001, "Ptr", 0, "Ptr", 0)
         Loop 100 {
             if FileExist(hungReady)
@@ -172,6 +198,18 @@ RunSelfTests() {
             Sleep(10)
         }
         Assert(FileExist(hungReady), "测试窗口进入真实无响应状态", results)
+        stalledGeometry := PhysicalGeometry(hwnd)
+        beforeDpi := DllCall("GetThreadDpiAwarenessContext", "Ptr")
+        beforeCritical := A_IsCritical
+        started := A_TickCount
+        Assert(PositionWindow(hwnd, "center") = false && A_TickCount - started < 250,
+            "无响应定位有界返回且不提交移动", results)
+        Assert(DllCall("AreDpiAwarenessContextsEqual", "Ptr", beforeDpi,
+            "Ptr", DllCall("GetThreadDpiAwarenessContext", "Ptr")) && A_IsCritical = beforeCritical,
+            "定位超时恢复线程 DPI 和 Critical 状态", results)
+        started := A_TickCount
+        PositionWindow(fixtures[2].hwnd, "center")
+        Assert(A_TickCount - started < 250, "卡住一个窗口仍可定位另一个", results)
         started := A_TickCount
         Assert(RestoreWindow(hwnd, false) && A_TickCount - started < 500,
             "无响应窗口恢复请求不阻塞主线程", results)
@@ -189,6 +227,9 @@ RunSelfTests() {
         Sleep(1700)
         MaintainWindows()
         Assert(!WT.windows.Has(hwnd), "目标恢复响应后正常清理记录", results)
+        resumedGeometry := PhysicalGeometry(hwnd)
+        Assert(resumedGeometry.x = stalledGeometry.x && resumedGeometry.y = stalledGeometry.y,
+            "目标恢复后不执行被跳过的旧定位", results)
         HideWindow(hwnd)
         WT.list.Modify(1, "Select Focus")
         selection := WT.list.GetText(WT.list.GetNext(), 2)
