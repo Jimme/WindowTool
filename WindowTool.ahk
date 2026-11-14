@@ -10,14 +10,14 @@
 ; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See LICENSE.
 #Requires AutoHotkey v2.0
 #SingleInstance Off
-;@Ahk2Exe-SetVersion 0.1.3
-;@Ahk2Exe-SetProductVersion 0.1.3
+;@Ahk2Exe-SetVersion 0.1.4
+;@Ahk2Exe-SetProductVersion 0.1.4
 ;@Ahk2Exe-SetDescription WindowTool
 
 WT_TEST := A_Args.Length && (A_Args[1] = "--test" || A_Args[1] = "--probe"
     || A_Args[1] = "--preview" || A_Args[1] = "--crash-host")
 #Include TrayManager.ahk
-; 窗口小助手 v0.1.2
+; WindowTool 窗口定位
 ; Win+F12：水平、垂直同时居中；重复按下仍保持居中。
 ; Win+F11：上 / 中 / 下循环，水平不动。
 ; Win+F10：左 / 中 / 右循环，垂直不动。

@@ -69,11 +69,13 @@ KeyLabel(key) {
 }
 
 ; 在原注册仍然生效时取得新注册。失败只释放新取得的组合，不动旧组合。
-StageKeys(keys) {
+StageKeys(keys, winF11Hook := unset, allowWinF11Conflict := false) {
     global WT
+    if !IsSet(winF11Hook)
+        winF11Hook := WT.winF11Hook
     if keys.Length != Actions().Length
         throw ValueError("快捷键配置项数量不正确。")
-    staged := {bindings: Map(), actions: Map(), added: []}
+    staged := {bindings: Map(), actions: Map(), added: [], conflicts: Map()}
     try {
         for index, key in keys {
             if key = ""
@@ -82,7 +84,8 @@ StageKeys(keys) {
             if staged.actions.Has(signature)
                 throw ValueError(Actions()[index].label " 与其他功能使用了同一个快捷键。")
             staged.actions[signature] := index
-            if WT.bindings.Has(signature) {
+            useHook := p.vk = 0x7B || p.vk = 0x14 || (winF11Hook && signature = "8:122")
+            if WT.bindings.Has(signature) && (WT.bindings[signature].hook != "") = useHook {
                 staged.bindings[signature] := WT.bindings[signature]
                 continue
             }
@@ -91,15 +94,20 @@ StageKeys(keys) {
                 throw Error("快捷键注册编号已用尽，请退出后重新启动。")
             ; F12 被 Windows 留给调试器；CapsLock 用钩子抑制大小写切换。
             ; 其余键用 RegisterHotKey 取得系统级冲突反馈。
-            if p.vk = 0x7B || p.vk = 0x14 {
+            if useHook {
                 binding.hook := "$" p.key
                 Hotkey(binding.hook, HookPressed.Bind(signature, p.vk), "On T1")
                 if WT.hooksPaused
                     Hotkey(binding.hook, "Off")
             } else if !DllCall("RegisterHotKey", "Ptr", A_ScriptHwnd, "Int", binding.id,
                 "UInt", p.modifiers | 0x4000, "UInt", p.vk) {
-                throw Error(Actions()[index].label "：" KeyLabel(key)
-                    " 注册失败，可能已被占用（Windows 错误 " A_LastError "）。")
+                code := A_LastError
+                message := Actions()[index].label "：" KeyLabel(key)
+                    . " 注册失败，可能已被占用（Windows 错误 " code "）。"
+                if !allowWinF11Conflict || signature != "8:122" || code != 1409
+                    throw Error(message)
+                staged.conflicts[index] := message
+                continue
             }
             staged.added.Push(binding)
             staged.bindings[signature] := binding
@@ -126,7 +134,7 @@ DiscardKeys(staged) {
 CommitKeys(keys, staged) {
     global WT
     for signature, binding in WT.bindings {
-        if !staged.bindings.Has(signature)
+        if !staged.bindings.Has(signature) || staged.bindings[signature] != binding
             ReleaseBinding(binding)
     }
     for signature, binding in staged.bindings
@@ -205,8 +213,10 @@ ExecuteAction(index) {
     }
 }
 
-SaveSettings(controls, status, preferences := unset) {
+SaveSettings(controls, status, preferences := unset, winF11Hook := unset) {
     global WT
+    if !IsSet(winF11Hook)
+        winF11Hook := WT.winF11Hook
     CancelRecording()
     keys := []
     for c in controls {
@@ -233,12 +243,20 @@ SaveSettings(controls, status, preferences := unset) {
                 if seen.Has(signature)
                     throw Error("快捷键重复，请检查 " Actions()[index].label)
                 seen[signature] := index
+                if winF11Hook && !WT.winF11Hook && errors.Has(index) && signature = "8:122" {
+                    effective[index] := key
+                    errors.Delete(index)
+                }
             } catch Error as e {
                 if !errors.Has(index) || InStr(e.Message, "快捷键重复")
                     throw e
             }
         }
-        staged := StageKeys(effective)
+        staged := StageKeys(effective, winF11Hook, WT.winF11Hook && !winF11Hook)
+        for index, message in staged.conflicts {
+            effective[index] := ""
+            errors[index] := message
+        }
         ; 保留其他 INI 段，只更新快捷键；写入失败时原注册、原配置均保留。
         temp := WT.ini ".tmp"
         if FileExist(WT.ini)
@@ -247,12 +265,14 @@ SaveSettings(controls, status, preferences := unset) {
             FileDelete(temp)
         for index, action in Actions()
             IniWrite(keys[index], temp, "Hotkeys", action.name)
+        IniWrite(Integer(winF11Hook), temp, "Hotkeys", "WinF11Compatibility")
         if IsSet(preferences) {
             IniWrite(preferences.process, temp, "Interface", "ShowProcess")
             IniWrite(preferences.time, temp, "Interface", "ShowTime")
         }
         FileMove(temp, WT.ini, true)
         CommitKeys(effective, staged)
+        WT.winF11Hook := winF11Hook
         WT.configuredKeys := keys.Clone(), WT.keyErrors := errors
         if IsSet(preferences) {
             WT.showProcess := preferences.process, WT.showTime := preferences.time
@@ -315,6 +335,7 @@ ConfirmLeaveSettings(decision := "", action := "退出") {
             WT.processOption.Value := WT.showProcess
             WT.timeOption.Value := WT.showTime
             WT.startupEnable.Value := WT.startupBaseline
+            WT.winF11Option.Value := WT.winF11Hook
         }
     }
     return true
@@ -417,7 +438,7 @@ ResumeHooks() {
     global WT
     if WT.recorder
         return
-    for name in ["Ctrl", "Shift", "Alt", "LWin", "RWin", "CapsLock", "F12"] {
+    for name in ["Ctrl", "Shift", "Alt", "LWin", "RWin", "CapsLock", "F11", "F12"] {
         if GetKeyState(name, "P")
             return
     }

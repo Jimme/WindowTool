@@ -337,6 +337,61 @@ RunSelfTests() {
         Assert(ApplySettings(true) && !DllCall("IsWindowVisible", "Ptr", WT.settings.Hwnd),
             "确定应用后关闭设置", results)
         OpenSettings(2)
+        ResetSettingsPage()
+        Assert(WT.controls[5].key = "#F11" && WT.xboxSettings.Visible && !WT.winF11Option.Value,
+            "恢复默认使用 Win+F11 并显示 Xbox 设置入口", results)
+        WT.controls[5].enabled.Value := false
+        RefreshKeyStates()
+        Assert(!WT.xboxSettings.Visible && WT.keyHelp.Visible, "停用 Win+F11 后隐藏 Xbox 设置入口", results)
+        xboxKeys := TestKeys(), xboxKeys[6] := "#vk7A"
+        FillSettings(xboxKeys)
+        Assert(WT.xboxSettings.Visible && WT.winF11Option.Visible, "识别其他功能的 Win+F11 键位", results)
+        OpenSettings(3)
+        Assert(!WT.xboxSettings.Visible, "诊断页不显示 Xbox 设置入口", results)
+        OpenSettings(2)
+        Assert(WT.xboxSettings.Visible, "切回快捷键页恢复 Xbox 设置入口", results)
+        FillSettings(WT.configuredKeys)
+        Assert(!WT.xboxSettings.Visible && WT.keyHelp.Visible, "其他组合继续显示常规录制提示", results)
+        WT.startupEnable.Enabled := false
+        ownsWinF11 := DllCall("RegisterHotKey", "Ptr", blocker.Hwnd, "Int", 903, "UInt", 8, "UInt", 0x7A)
+        Assert(ownsWinF11 || A_LastError = 1409, "准备 Win+F11 占用", results)
+        StartKeys(xboxKeys)
+        FillSettings(WT.configuredKeys)
+        Assert(WT.keyErrors.Has(6) && !WT.winF11Hook, "普通注册保留 Win+F11 冲突", results)
+        WT.winF11Option.Value := true
+        Assert(HasUnsavedSettings() && ConfirmLeaveSettings("Discard") && !WT.winF11Option.Value,
+            "取消兼容模式编辑保留原值", results)
+        WT.winF11Option.Value := true
+        Assert(ApplySettings() && WT.bindings["8:122"].hook = "$#F11" && !WT.keyErrors.Has(6)
+            && WT.bindings[ParseKey(xboxKeys[1]).signature].hook = ""
+            && IniRead(WT.ini, "Hotkeys", "WinF11Compatibility") = "1", "兼容模式仅为 Win+F11 注册钩子", results)
+        Assert(InStr(WT.diagnostics.Value, "已绑定（键盘钩子）"), "诊断显示实际钩子绑定", results)
+        StartRecording(WT.controls[6])
+        Assert(WT.hooksPaused && WT.recorder, "录制期间暂停快捷键钩子", results)
+        CancelRecording()
+        ResumeHooks()
+        Assert(!WT.hooksPaused && WT.bindings["8:122"].hook = "$#F11", "结束录制后恢复兼容钩子", results)
+        RetryConfiguredKeys()
+        Assert(WT.bindings["8:122"].hook = "$#F11" && !WT.keyErrors.Has(6), "重新检测保留兼容钩子", results)
+        WT.ini := A_ScriptDir "\tests\missing-folder\blocked.ini"
+        WT.winF11Option.Value := false
+        Assert(!ApplySettings() && WT.winF11Hook && WT.bindings["8:122"].hook = "$#F11",
+            "关闭兼容模式写入失败时保留原钩子", results)
+        WT.ini := originalIni
+        WT.winF11Option.Value := false
+        Assert(ApplySettings() && !WT.bindings.Has("8:122") && WT.keyErrors.Has(6)
+            && LoadKeys()[6] = "#vk7A" && IniRead(WT.ini, "Hotkeys", "WinF11Compatibility") = "0",
+            "关闭兼容模式后保留被占用的 Win+F11 配置", results)
+        if ownsWinF11
+            DllCall("UnregisterHotKey", "Ptr", blocker.Hwnd, "Int", 903)
+        WT.winF11Option.Value := true
+        FillSettings(TestKeys())
+        Assert(ApplySettings() && InStr(WT.diagnostics.Value, "当前无生效绑定"),
+            "诊断区分兼容模式开启但未绑定", results)
+        WT.winF11Option.Value := false
+        Assert(ApplySettings(), "还原兼容模式测试状态", results)
+        Assert(SaveSettings(ControlsFor(TestKeys()), status), "还原其他回归的测试键位", results)
+        FillSettings(WT.configuredKeys)
         WT.controls[4].enabled.Value := false
         RefreshKeyStates()
         Assert(WT.controls[4].state.Text = "待停用", "未应用的停用状态", results)
@@ -461,8 +516,12 @@ RunSelfTests() {
         A_IconHidden := true
         Assert(!TrayExists() && EnsureTray() && TrayExists(), "检测托盘丢失并重建", results)
         UnregisterKeys()
+        IniWrite("#F11", WT.ini, "Hotkeys", "Vertical")
+        IniWrite("1", WT.ini, "Hotkeys", "WinF11Compatibility")
         InitManager()
         Assert(WT.mutex && TrayExists(), "完整启动初始化", results)
+        Assert(WT.winF11Hook && WT.bindings["8:122"].hook = "$#F11" && WT.keys[5] = "#F11",
+            "启动初始化从磁盘恢复兼容模式和绑定", results)
         CloseSettings("Discard")
         WT.gui.Hide()
         command := A_IsCompiled ? '"' A_ScriptFullPath '" --probe'

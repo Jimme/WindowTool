@@ -52,7 +52,10 @@ OpenSettings(page := 1) {
             button.OnEvent("Click", StartRecording.Bind(c))
             y += 23
         }
-        g.AddText("x28 y370 w500 r2", "Esc 取消录制。CapsLock / F12 的钩子冲突可能无法检测。")
+        WT.winF11Option := g.AddCheckbox("x28 y367 w380 h22", "Win+F11 兼容模式（可能拦截 Xbox 快捷键）")
+        WT.keyHelp := g.AddText("x28 y393 w500 r1", "更改后点击应用。Esc 取消录制。键盘钩子冲突可能无法检测。")
+        WT.xboxSettings := g.AddButton("x418 y371 w112 h26 Hidden", "Xbox 设置…")
+        WT.xboxSettings.OnEvent("Click", ShowXboxShortcutHelp)
         tabs.UseTab(4)
         WT.diagnostics := g.AddEdit("x22 y46 w516 h278 ReadOnly -Wrap", "")
         g.AddButton("x22 y334 w112 h26", "重新检测快捷键").OnEvent("Click", RetryConfiguredKeys)
@@ -98,6 +101,7 @@ OpenSettings(page := 1) {
     if !DllCall("IsWindowVisible", "Ptr", WT.settings.Hwnd) {
         CancelRecording()
         FillSettings(WT.configuredKeys.Length ? WT.configuredKeys : WT.keys)
+        WT.winF11Option.Value := WT.winF11Hook
         WT.processOption.Value := WT.showProcess
         WT.timeOption.Value := WT.showTime
         RefreshStartup(true)
@@ -149,20 +153,45 @@ RefreshKeyStates() {
     global WT
     if !WT.settings
         return
+    hotkeyPage := WT.tabs.Value = 3
+    xboxConflict := false
     for i, c in WT.controls {
         desired := c.enabled.Value ? c.key : ""
         saved := WT.configuredKeys.Length >= i ? WT.configuredKeys[i] : ""
         c.state.Text := c.enabled.Value && c.key = "" ? "待录制"
             : desired != saved ? (desired = "" ? "待停用" : saved = "" ? "待启用" : "待修改")
             : WT.keyErrors.Has(i) ? "冲突（已保留）" : WT.keys.Length >= i && WT.keys[i] != "" ? "运行中" : "未启用"
+        if hotkeyPage && !xboxConflict && desired != "" {
+            ; 比较组合签名，也识别旧配置中使用 vk7A 的同一键位。
+            try xboxConflict := ParseKey(desired).signature = "8:122"
+        }
     }
+    WT.winF11Option.Visible := hotkeyPage
+    WT.keyHelp.Visible := hotkeyPage
+    WT.xboxSettings.Visible := xboxConflict
+}
+
+ShowXboxShortcutHelp(*) {
+    global WT
+    CancelRecording()
+    answer := MsgBox(
+        "Win+F11 可进入或退出 Xbox 模式。若要保留这个键位给 WindowTool，可在 Windows 设置 → 游戏 → Xbox 模式关闭该功能。"
+        . "`n`n普通电脑关闭「启用 Xbox 模式」。游戏掌机可把主页应用选为「无」。"
+        . "`n`n关闭 Xbox 模式后若 Win+F11 仍被占用，可勾选「Win+F11 兼容模式」并应用。兼容模式可能优先于其他使用该键的软件。"
+        . "`n`n现在打开 Windows 的 Xbox 模式设置？", "WindowTool", "OKCancel Iconi Owner" WT.settings.Hwnd)
+    if answer != "OK"
+        return
+    try Run("ms-settings:gaming-fullscreen")
+    catch Error
+        WT.keyStatus.Text := "无法打开 Xbox 模式设置。请在 Windows 设置 → 游戏中查找「Xbox 模式」。"
 }
 
 ApplySettings(closeAfter := false) {
     global WT
     WT.saveFailurePage := 2
     wantedStartup := WT.startupEnable.Value
-    if !SaveSettings(WT.controls, WT.keyStatus, {process: WT.processOption.Value, time: WT.timeOption.Value})
+    if !SaveSettings(WT.controls, WT.keyStatus, {process: WT.processOption.Value, time: WT.timeOption.Value},
+        !!WT.winF11Option.Value)
         return false
     if WT.startupEnable.Enabled && wantedStartup != WT.startupBaseline {
         if !ChangeStartup(wantedStartup) {
@@ -189,6 +218,7 @@ HasUnsavedSettings() {
             return true
     }
     return WT.processOption.Value != WT.showProcess || WT.timeOption.Value != WT.showTime
+        || !!WT.winF11Option.Value != WT.winF11Hook
         || (WT.startupEnable.Enabled && WT.startupEnable.Value != WT.startupBaseline)
 }
 
@@ -225,6 +255,7 @@ ResetSettingsPage(*) {
     global WT
     if WT.tabs.Value = 3 {
         FillSettings(DefaultKeys())
+        WT.winF11Option.Value := false
         WT.keyStatus.Text := "本页已恢复默认，点击应用后生效。"
     } else if WT.tabs.Value = 2 {
         WT.startupEnable.Value := false
@@ -256,6 +287,10 @@ RefreshDiagnostics() {
         . "`r`n`r`n自启（点击常规页重新检测可更新）：`r`n" (HasProp(WT, "startupDetails") ? WT.startupDetails : WT.startupStatus.Text)
     for i, errorText in WT.keyErrors
         text .= "`r`n`r`n" Actions()[i].label "：" errorText
+    if WT.bindings.Has("8:122")
+        text .= "`r`n`r`nWin+F11：" (WT.bindings["8:122"].hook != "" ? "已绑定（键盘钩子）" : "已绑定（系统注册）")
+    else if WT.winF11Hook
+        text .= "`r`n`r`nWin+F11：兼容模式已开启，当前无生效绑定。"
     for scope, errorText in WT.activeIssues
         text .= "`r`n`r`n当前问题：" errorText
     if WT.lastError != ""

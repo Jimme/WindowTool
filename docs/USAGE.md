@@ -1,6 +1,6 @@
 # 使用说明
 
-当前正式版：**0.1.3**。历史版本行为见[更新记录](../CHANGELOG.md)。
+当前正式版：**0.1.4**。历史版本行为见[更新记录](../CHANGELOG.md)。
 
 ## 界面与入口
 
@@ -38,7 +38,8 @@ WindowTool 使用同一个窗口，标签顺序为 **窗口 → 常规 → 快�
 ### 冲突与限制
 
 - 六个默认组合在本程序内部互不重复，但系统和其他软件可能占用。
-- **Win+F11 可能与 Windows 11 的 Xbox 模式冲突。** 关闭 Xbox 模式入口不保证立即释放快捷键；仍不可用时可自定义其他组合。见[微软说明](https://support.microsoft.com/en-us/servicing/os/windows/docs/2025/10/windows-gaming-full-screen-experience)。
+- **Win+F11 可能与 Windows 11 的 Xbox 模式冲突。** 打开 Windows 设置 → 游戏 → Xbox 模式。普通电脑关闭「启用 Xbox 模式」，游戏掌机把主页应用选为「无」。关闭后在 WindowTool 的「状态与诊断」重新检测快捷键，再实际按 Win+F11 确认。 [微软说明](https://support.microsoft.com/en-us/servicing/os/windows/docs/2025/10/windows-gaming-full-screen-experience)
+- 快捷键页提供「Xbox 设置…」入口。如果关闭 Xbox 模式后 Win+F11 仍被占用，可勾选「Win+F11 兼容模式」并应用。兼容模式默认关闭，仅处理 Win+F11，可能优先于使用这个组合的其他软件。关闭兼容模式会重新尝试系统注册。
 - Ctrl+Shift+CapsLock / Ctrl+Alt+CapsLock 避开浏览器常用的 Ctrl+Shift+Tab，但讲述人等辅助功能可能把 CapsLock 作为修饰键。
 - F12 被系统注册接口列为调试器保留键，因此 Win+F12 使用键盘钩子；CapsLock 同样使用钩子，以抑制大小写切换。见[RegisterHotKey 文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey)。
 - 钩子不能完整检测其他软件钩子的冲突；其他组合通过系统注册获取冲突反馈。应用内部快捷键不一定向系统注册，不能保证自动检测。
@@ -107,6 +108,8 @@ WindowTool 使用同一个窗口，标签顺序为 **窗口 → 常规 → 快�
 异常退出后应先恢复隐藏窗口，再移动目录或清理记录。不要同时运行两个正式实例。
 
 ## 验证范围
+
+0.1.4 源码和编译版各通过 151 项检查，新增覆盖 Win+F11 兼容模式的切换、保存失败回滚、录制暂停和恢复、重新检测及启动时恢复配置。
 
 0.1.3 源码及编译版各通过 131 项检查，覆盖设置保存与失败处理、快捷键、定位、隐藏恢复、恢复记录、托盘通知和二次启动。定位包含三种 DPI 感知模式、150% 与 100% 双屏、快速连续调用、无响应及目标中途关闭。AudioBox 连续水平、垂直各 30 次实测无漂移及尺寸变化。
 
