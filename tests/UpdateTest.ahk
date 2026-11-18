@@ -38,6 +38,11 @@ try {
     FinishUpdateCheck()
     if !InStr(WT.updateStatus.Text, "已是最新版本")
         throw Error("相同版本提示错误")
+    WT.version := "0.1.4"
+    WT.updateRequest := {Status: 200, ResponseText: '{"tag_name":"v0.1.3"}'}
+    FinishUpdateCheck()
+    if !InStr(WT.updateStatus.Text, "当前版本 0.1.4 高于 GitHub 最新正式版 0.1.3")
+        throw Error("本地正式版较新时提示错误")
     WT.version := "0.1.3-alpha.1"
     WT.updateRequest := {Status: 200, ResponseText: '{"tag_name":"v0.1.2"}'}
     FinishUpdateCheck()

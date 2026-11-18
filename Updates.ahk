@@ -92,6 +92,7 @@ FinishUpdateCheck(errorText := "") {
                 newer := IsNewerVersion(latest, WT.version)
                 text := newer ? "发现新版本 " latest "，当前为 " WT.version "。"
                     : InStr(WT.version, "-") ? "当前为测试版 " WT.version "；最新正式版 " latest "。"
+                    : IsNewerVersion(WT.version, latest) ? "当前版本 " WT.version " 高于 GitHub 最新正式版 " latest "。"
                     : "当前已是最新版本（" WT.version "）。"
             }
         }

@@ -404,6 +404,12 @@ RunSelfTests() {
         WT.startupEnable.Value := !choice
         RefreshStartup()
         Assert(WT.startupEnable.Value = !choice, "重新检测保留未应用自启选择", results)
+        SyncStartupChoice(true, true)
+        SyncStartupChoice(false)
+        Assert(!WT.startupBaseline && !WT.startupEnable.Value && !HasUnsavedSettings(),
+            "外部停用自启后同步未编辑的勾选，不产生待保存修改", results)
+        SyncStartupChoice(true)
+        Assert(WT.startupBaseline && WT.startupEnable.Value, "外部启用自启后同步未编辑的勾选", results)
         RefreshStartup(true)
         OpenSettings(4)
         Assert(!WT.resetButton.Enabled, "关于页禁用恢复默认", results)

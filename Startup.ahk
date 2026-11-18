@@ -164,9 +164,7 @@ RefreshStartup(resetChoice := false) {
             note := "启用后在登录时延迟 10 秒启动。"
             WT.startupDetails := "未配置 WindowTool 管理员自启动任务。"
         }
-        WT.startupBaseline := !!task && task.Enabled
-        if resetChoice
-            WT.startupEnable.Value := WT.startupBaseline
+        SyncStartupChoice(!!task && task.Enabled, resetChoice)
         WT.startupEnable.Enabled := A_IsCompiled && !StartupIsPreview()
         WT.startupRepair.Enabled := A_IsCompiled && !StartupIsPreview()
         if StartupIsPreview() {
@@ -184,6 +182,14 @@ RefreshStartup(resetChoice := false) {
         WT.startupEnable.Enabled := false
         WT.startupRepair.Enabled := false
     }
+}
+
+SyncStartupChoice(enabled, resetChoice := false) {
+    global WT
+    hasPendingChoice := HasProp(WT, "startupBaseline") && WT.startupEnable.Value != WT.startupBaseline
+    WT.startupBaseline := enabled
+    if resetChoice || !hasPendingChoice
+        WT.startupEnable.Value := enabled
 }
 
 ChangeStartup(enable) {
