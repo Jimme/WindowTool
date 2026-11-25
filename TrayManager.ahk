@@ -65,7 +65,6 @@ InitManager() {
         WT.winF11Hook := false
         StartKeys(DefaultKeys())
     }
-    A_IconTip := "WindowTool"
     A_TrayMenu.Delete()
     A_TrayMenu.Add("窗口管理…", (*) => ShowManager())
     A_TrayMenu.Default := "窗口管理…"
@@ -76,6 +75,7 @@ InitManager() {
     A_TrayMenu.Add()
     A_TrayMenu.Add("退出（恢复全部窗口）", (*) => ExitApp())
     WT.trayReady := true
+    UpdateTrayTip()
     UpdateTrayActions()
     try {
         WT.showProcess := IniRead(WT.ini, "Interface", "ShowProcess", 1) = 1
@@ -144,6 +144,7 @@ EnsureTray() {
     if TrayExists()
         return true
     ; 切换可清除 AHK 初次 NIM_ADD 失败后留下的内部状态。
+    UpdateTrayTip()
     A_IconHidden := true
     A_IconHidden := false
     ok := TrayExists()
@@ -237,6 +238,7 @@ HideWindow(hwnd, notify := true) {
     } catch Error as e {
         WT.lastError := e.Message
         WT.activeIssues["hide"] := e.Message
+        UpdateSummary()
         WTLog("收起失败: " e.Message)
         if notify
             MsgBox(e.Message, "WindowTool")
@@ -262,6 +264,7 @@ RestoreWindow(hwnd, activate := true) {
     if !DllCall("ShowWindowAsync", "Ptr", hwnd, "Int", mode) {
         WT.lastError := "无法发送恢复请求；窗口记录已保留，可稍后重试。"
         WT.activeIssues["restore:" hwnd] := WT.lastError
+        UpdateSummary()
         return false
     }
     WT.pendingRestore[hwnd] := {started: A_TickCount, activate: activate}
@@ -347,24 +350,30 @@ ShowManager(*) {
 
 CreateManagerPage(g) {
     global WT
-        WT.gui := g
-        WT.list := g.AddListView("x22 y46 w516 h310 -Multi", ["窗口标题", "窗口句柄", "所属程序", "收起时间"])
-        WT.listLayout := ""
-        WT.imageList := IL_Create(16)
-        WT.list.SetImageList(WT.imageList, 1)
-        WT.icons := Map()
-        WT.list.ModifyCol(1, 280), WT.list.ModifyCol(2, 0)
-        ApplyListPreferences()
-        WT.list.OnEvent("DoubleClick", (*) => RestoreSelected())
-        WT.list.OnEvent("ItemSelect", (*) => UpdateManagerButtons())
-        selected := g.AddButton("x22 y368 w90 h26", "恢复选中")
-        selected.OnEvent("Click", (*) => RestoreSelected())
-        WT.restoreSelectedButton := selected
-        all := g.AddButton("x+8 w90 h26", "恢复全部")
-        all.OnEvent("Click", (*) => RestoreAll())
-        WT.restoreAllButton := all
-        WT.managerHints := Map(WT.list.Hwnd, "list", selected.Hwnd, "selected", all.Hwnd, "all")
-        WT.hoverControl := 0, WT.hoverSince := 0
+    WT.gui := g
+    WT.list := g.AddListView("x17 y46 w494 h208 -Multi +0x04000000", ["窗口标题", "窗口句柄", "所属程序", "收起时间"])
+    WT.listLayout := ""
+    WT.imageList := IL_Create(16)
+    WT.list.SetImageList(WT.imageList, 1)
+    WT.icons := Map()
+    WT.list.ModifyCol(2, 0)
+    ApplyListPreferences()
+    g.SetFont("s9 w600", "Microsoft YaHei UI")
+    WT.managerEmptyTitle := g.AddText("x31 y134 w466 h22 Center +0x200 Hidden", "没有已收起的窗口")
+    g.SetFont("s9 w400", "Microsoft YaHei UI")
+    WT.managerEmptyDetail := g.AddText("x31 y156 w466 h22 Center +0x200 Hidden", "")
+    for ctrl in [WT.managerEmptyTitle, WT.managerEmptyDetail]
+        DllCall("SetWindowPos", "Ptr", ctrl.Hwnd, "Ptr", 0, "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x13)
+    InitManagerAppearance()
+    WT.list.OnEvent("DoubleClick", (control, row) => row ? RestoreSelected() : 0)
+    WT.list.OnEvent("ItemSelect", (*) => UpdateManagerButtons())
+    WT.restoreSelectedButton := g.AddButton("x17 y262 w82 h25", "恢复选中")
+    WT.restoreSelectedButton.OnEvent("Click", (*) => RestoreSelected())
+    WT.restoreAllButton := g.AddButton("x105 y262 w82 h25", "恢复全部")
+    WT.restoreAllButton.OnEvent("Click", (*) => RestoreAll())
+    WT.summary := g.AddText("x196 y262 w239 h25 +0x4200", "")
+    WT.managerHints := Map(WT.list.Hwnd, "list", WT.restoreSelectedButton.Hwnd, "selected", WT.restoreAllButton.Hwnd, "all")
+    WT.hoverControl := 0, WT.hoverSince := 0
 }
 
 RefreshManager() {
@@ -474,20 +483,83 @@ ManagerHint() {
 
 UpdateSummary() {
     global WT
+    UpdateTrayTip()
     if !WT.summary
         return
+    key := AppliedKeyLabel(1)
+    hint := WT.recoveryBlocked ? "恢复记录异常，详情见状态与诊断。"
+        : key = "停用" ? "收起快捷键已停用，可到快捷键页启用。"
+        : key = "不可用" ? "收起快捷键不可用，请到状态与诊断检查。"
+        : "收起快捷键：" key
+    if !HasProp(WT, "emptyManagerHint") || WT.emptyManagerHint != hint {
+        WT.emptyManagerHint := hint
+        WT.managerEmptyDetail.Text := hint
+    }
+    UpdateManagerEmpty()
     text := "已收起 " WT.windows.Count " 个窗口"
-    if WT.pendingRestore.Count
-        text .= "　正在恢复 " WT.pendingRestore.Count " 个"
+    status := ""
     if WT.recoveryBlocked
-        text .= "　恢复记录异常，请到设置查看。"
+        status := "恢复记录异常，见诊断"
     else if WT.activeIssues.Count || WT.warnings != ""
-        text .= "　操作异常，详情见设置 → 状态与诊断。"
+        status := "操作异常，见诊断"
     else if WT.keyErrors.Count
-        text .= "　" WT.keyErrors.Count " 项快捷键不可用，请到设置查看。"
-    else if !A_IsAdmin
-        text .= "　当前为普通权限"
-    WT.summary.Text := text
+        status := WT.keyErrors.Count " 项键位不可用"
+    else if WT.pendingRestore.Count
+        status := "正在恢复 " WT.pendingRestore.Count " 个"
+    else if WT.windows.Count
+        status := "双击恢复"
+    if status != ""
+        text .= " · " status
+    if WT.summary.Text != text
+        WT.summary.Text := text
+}
+
+UpdateManagerEmpty() {
+    global WT
+    visible := WT.settings && WT.tabs.Value = 1 && !WT.windows.Count
+    for ctrl in [WT.managerEmptyTitle, WT.managerEmptyDetail] {
+        if ctrl.Visible != visible
+            ctrl.Visible := visible
+    }
+}
+
+AppliedKeyLabel(index) {
+    global WT
+    if WT.keys.Length >= index && WT.keys[index] != ""
+        return StrReplace(KeyLabel(WT.keys[index]), " + ", "+")
+    return WT.keyErrors.Has(index) ? "不可用" : "停用"
+}
+
+BuildTrayTip() {
+    global WT
+    tip := "WindowTool " WT.version "`n已收起窗口：" WT.windows.Count
+    names := ["收起窗口：", "恢复窗口：", "窗口管理："]
+    fallback := "见设置"
+    remaining := 127 - StrLen(tip)
+    for name in names
+        remaining -= StrLen(name fallback) + 1
+    for index, name in names {
+        key := AppliedKeyLabel(index)
+        extra := StrLen(key) - StrLen(fallback)
+        if extra > remaining
+            key := fallback
+        else
+            remaining -= extra
+        tip .= "`n" name key
+    }
+    issue := WT.recoveryBlocked ? "恢复记录异常"
+        : WT.activeIssues.Count || WT.warnings != "" ? "有运行异常，见诊断"
+        : WT.keyErrors.Count ? WT.keyErrors.Count " 项快捷键不可用" : ""
+    return issue != "" && StrLen(tip) + StrLen(issue) + 1 <= 127 ? tip "`n" issue : tip
+}
+
+UpdateTrayTip() {
+    global WT
+    if !WT.trayReady
+        return
+    tip := BuildTrayTip()
+    if A_IconTip != tip
+        A_IconTip := tip
 }
 
 MaintainWindows() {
@@ -517,6 +589,7 @@ MaintainWindows() {
             try SaveJournal()
             catch Error as e
                 WTLog("清理恢复记录失败: " e.Message)
+            UpdateTrayTip()
         }
         if WT.gui && DllCall("IsWindowVisible", "Ptr", WT.gui.Hwnd)
             RefreshManager()
@@ -574,9 +647,9 @@ ApplyListPreferences() {
         rect := Buffer(16, 0)
         DllCall("GetClientRect", "Ptr", WT.list.Hwnd, "Ptr", rect)
         width := Floor(NumGet(rect, 8, "Int") * 96 / A_ScreenDPI) - 4
-        WT.list.ModifyCol(1, Max(100, width - (WT.showProcess ? 166 : 0) - (WT.showTime ? 90 : 0)))
-        WT.list.ModifyCol(3, WT.showProcess ? 166 : 0)
-        WT.list.ModifyCol(4, WT.showTime ? 90 : 0)
+        WT.list.ModifyCol(1, Max(100, width - (WT.showProcess ? 137 : 0) - (WT.showTime ? 76 : 0) - 16))
+        WT.list.ModifyCol(3, WT.showProcess ? 137 : 0)
+        WT.list.ModifyCol(4, WT.showTime ? 76 : 0)
     }
 }
 

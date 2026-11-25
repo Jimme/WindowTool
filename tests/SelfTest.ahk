@@ -469,6 +469,11 @@ RunSelfTests() {
         Assert(!InStr(WT.keyStatus.Text, "快捷键页测试提示"), "诊断页不沿用配置页提示", results)
         OpenSettings(2)
         Assert(WT.keyStatus.Text = "快捷键页测试提示", "切回页面保留本页提示", results)
+        SetReleasePageAvailable(true)
+        Assert(!WT.releaseButton.Visible, "其他页不显示异步更新完成后的发布页按钮", results)
+        OpenSettings(4)
+        Assert(WT.releaseButton.Visible, "切回关于页显示已有发布页入口", results)
+        SetReleasePageAvailable(false)
         ShowLicense()
         Assert(StrLen(WT.licenseGui["Edit1"].Value) > 1000, "内置许可证可独立查看", results)
         WT.licenseGui.Hide()
@@ -497,8 +502,44 @@ RunSelfTests() {
         Critical("Off")
         CloseSettings("Discard")
         ShowManager()
+        WT.settings.GetClientPos(,, &clientWidth, &clientHeight)
+        Assert(clientWidth = 528 && clientHeight = 304, "窗口页采用紧凑客户区尺寸", results)
+        if !WT.uiHighContrast
+            Assert(SendMessage(0x1000, 0, 0, WT.list.Hwnd) = 0xFFFFFF
+                && SendMessage(0x1025, 0, 0, WT.list.Hwnd) = 0xFFFFFF, "列表正文与文字背景均为白色", results)
+        previousErrors := WT.keyErrors
+        try {
+            WT.keyErrors := Map(1, "测试注册失败")
+            UpdateSummary()
+            Assert(InStr(WT.summary.Text, "个窗口 · 1 项键位不可用") && !InStr(WT.summary.Text, "`n"),
+                "窗口计数与键位异常在同一行清晰分隔", results)
+        } finally {
+            WT.keyErrors := previousErrors
+            UpdateSummary()
+        }
+        frameAligned := true
+        for page in [4, 0, 1, 2, 3, 4, 0] {
+            OpenSettings(page)
+            navRect := Buffer(16), paneRect := Buffer(16)
+            DllCall("GetWindowRect", "Ptr", WT.tabs.Hwnd, "Ptr", navRect)
+            DllCall("GetWindowRect", "Ptr", WT.settingsPane.Hwnd, "Ptr", paneRect)
+            frameAligned := frameAligned && NumGet(navRect, 12, "Int") = NumGet(paneRect, 4, "Int")
+                && NumGet(paneRect, 12, "Int") - NumGet(paneRect, 4, "Int") = SettingsScale(page = 0 ? 259 : 376)
+        }
+        Assert(frameAligned, "反复切换五页时标签与页框相接且页框高度同步", results)
+        settingsTarget := "ahk_id " WT.settings.Hwnd
+        WinGetPos(&originalX, &originalY,,, settingsTarget)
+        if GetWorkArea(WT.settings.Hwnd, &areaL, &areaT, &areaR, &areaB) {
+            WinMove(originalX, areaB - 20,,, settingsTarget)
+            FitSettingsToWorkArea()
+            WinGetPos(&fittedX, &fittedY, &fittedW, &fittedH, settingsTarget)
+            Assert(fittedX >= areaL && fittedY >= areaT && fittedX + fittedW <= areaR && fittedY + fittedH <= areaB,
+                "窗口外框限制在显示器工作区", results)
+            WinMove(originalX, originalY,,, settingsTarget)
+        }
         Assert(!WT.restoreAllButton.Enabled && !WT.restoreSelectedButton.Enabled,
             "空列表禁用恢复按钮", results)
+        Assert(InStr(WT.emptyManagerHint, AppliedKeyLabel(1)), "空列表使用生效的收起绑定", results)
         oldError := WT.lastError
         WT.lastError := "历史测试错误"
         WT.activeIssues.Clear()
@@ -516,7 +557,7 @@ RunSelfTests() {
         WT.showProcess := false, WT.showTime := false
         ApplyListPreferences()
         width := SendMessage(0x101D, 0, 0, WT.list.Hwnd)
-        Assert(width > Round(500 * A_ScreenDPI / 96), "隐藏附属列后标题填满", results)
+        Assert(width > Round(470 * A_ScreenDPI / 96), "隐藏附属列后标题填满", results)
         WT.showProcess := true, WT.showTime := true
         ApplyListPreferences()
         A_IconHidden := true
@@ -528,6 +569,30 @@ RunSelfTests() {
         Assert(WT.mutex && TrayExists(), "完整启动初始化", results)
         Assert(WT.winF11Hook && WT.bindings["8:122"].hook = "$#F11" && WT.keys[5] = "#F11",
             "启动初始化从磁盘恢复兼容模式和绑定", results)
+        Assert(StrLen(A_IconTip) <= 127 && InStr(A_IconTip, "WindowTool " WT.version)
+            && InStr(A_IconTip, "已收起窗口：0") && InStr(A_IconTip, AppliedKeyLabel(1)),
+            "托盘提示使用版本、数量和生效绑定", results)
+        tip := A_IconTip
+        WT.controls[1].key := "^!+F24"
+        UpdateSummary()
+        Assert(A_IconTip = tip, "待应用键位不进入托盘提示", results)
+        FillSettings(WT.configuredKeys)
+        originalKeys := WT.configuredKeys.Clone(), changedKeys := originalKeys.Clone()
+        changedKeys[1] := "^!+F24"
+        Assert(SaveSettings(ControlsFor(changedKeys), WT.keyStatus)
+            && InStr(A_IconTip, "收起窗口：Ctrl+Alt+Shift+F24"), "成功应用改键后刷新托盘提示", results)
+        rejectedKeys := changedKeys.Clone(), rejectedKeys[1] := rejectedKeys[2]
+        Assert(!SaveSettings(ControlsFor(rejectedKeys), WT.keyStatus)
+            && InStr(A_IconTip, "收起窗口：Ctrl+Alt+Shift+F24"), "保存失败保留旧绑定和托盘提示", results)
+        SaveSettings(ControlsFor(originalKeys), WT.keyStatus)
+        savedKeys := WT.keys, savedErrors := WT.keyErrors
+        try {
+            WT.keys := savedKeys.Clone(), WT.keys[1] := "", WT.keys[2] := ""
+            WT.keyErrors := Map(1, "测试注册失败")
+            tip := BuildTrayTip()
+            Assert(InStr(tip, "收起窗口：不可用") && InStr(tip, "恢复窗口：停用"),
+                "托盘提示区分注册失败与停用", results)
+        } finally WT.keys := savedKeys, WT.keyErrors := savedErrors
         CloseSettings("Discard")
         WT.gui.Hide()
         command := A_IsCompiled ? '"' A_ScriptFullPath '" --probe'
@@ -540,7 +605,13 @@ RunSelfTests() {
         A_IconHidden := true
         DllCall("PostMessage", "Ptr", A_ScriptHwnd, "UInt", WT.taskbarMsg, "Ptr", 0, "Ptr", 0)
         Sleep(150)
-        Assert(TrayExists(), "任务栏重建通知恢复图标", results)
+        Assert(TrayExists() && A_IconTip = BuildTrayTip(), "任务栏重建通知恢复图标及动态提示", results)
+        Assert(HideWindow(hwnd, false) && InStr(A_IconTip, "已收起窗口：1"),
+            "收起后更新托盘计数", results)
+        RestoreWindow(hwnd, false)
+        Sleep(120)
+        Assert(!WT.windows.Count && InStr(A_IconTip, "已收起窗口：0"),
+            "恢复后更新托盘计数", results)
         ; 损坏的记录不能被新收起操作覆盖。
         FileOpen(WT.journal, "w", "UTF-8").Write(hwnd "|0`n")
         Assert(Throws(RecoverWindows), "拒绝零令牌，防止误恢复其他窗口", results)

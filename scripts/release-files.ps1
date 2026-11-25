@@ -5,6 +5,8 @@ function Get-ReleaseFiles([string]$Directory) {
         'RELEASE-MANIFEST.txt', 'SHA256.txt', 'THIRD_PARTY.md',
         'docs/BUILD-PROVENANCE.md', 'docs/DEVELOPMENT.md', 'docs/RELEASE-POLICY.md',
         'docs/REPOSITORY.md', 'docs/RPD.md', 'docs/USAGE.md', 'third-party/AutoHotkey-LICENSE.txt',
+        'docs/ui-reference/windows.png', 'docs/ui-reference/general.png', 'docs/ui-reference/keys.png',
+        'docs/ui-reference/diagnostics.png', 'docs/ui-reference/diagnostic-details.png', 'docs/ui-reference/about.png',
         'sources/AutoHotkey-v2.0.26-source.zip')
     $root = (Resolve-Path -LiteralPath $Directory).Path.TrimEnd('\')
     foreach ($file in Get-ChildItem -LiteralPath $root -File -Recurse -Force) {

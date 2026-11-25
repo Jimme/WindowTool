@@ -177,6 +177,7 @@ StartKeys(requested := unset) {
             WTLog("快捷键停用: " e.Message)
         }
     }
+    UpdateSummary()
 }
 
 HandleHotkey(id, *) {

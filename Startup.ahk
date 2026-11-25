@@ -218,6 +218,7 @@ ChangeStartup(enable) {
         MsgBox(WT.lastError, "WindowTool", "Icon!")
     }
     RefreshStartup(true)
+    UpdateSummary()
     return ok
 }
 
