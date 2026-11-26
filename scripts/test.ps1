@@ -39,7 +39,8 @@ try {
         }
         throw "Tests failed with exit code $($testProcess.ExitCode)."
     }
-    if (!(Test-Path -LiteralPath $resultPath) -or (Get-Content -LiteralPath $resultPath -First 1) -notmatch '^PASS \d+ checks$') {
+    $status = if (Test-Path -LiteralPath $resultPath) { [string](Get-Content -LiteralPath $resultPath -First 1) }
+    if ($status -notmatch '^PASS \d+ checks$') {
         throw 'Test process returned without a PASS result.'
     }
     Get-Content -LiteralPath $resultPath

@@ -11,7 +11,6 @@ $projectRoot = Split-Path $PSScriptRoot -Parent
 . (Join-Path $PSScriptRoot 'build-inputs.ps1')
 $buildInputs = Get-BuildInputs $projectRoot
 $entryPath = Join-Path $projectRoot 'WindowTool.ahk'
-$entryText = Get-Content -LiteralPath $entryPath -Raw
 $runtimeText = Get-Content -LiteralPath (Join-Path $projectRoot 'TrayManager.ahk') -Raw
 $releaseVersion = Get-ProjectVersion $projectRoot
 $runtimeVersion = [regex]::Match($runtimeText, 'version: "([^"]+)"').Groups[1].Value

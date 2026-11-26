@@ -299,7 +299,6 @@ FillSettings(keys) {
     for index, c in WT.controls {
         c.key := keys[index]
         c.enabled.Value := c.key != ""
-        c.display.Value := KeyLabel(c.key)
     }
     RefreshKeyStates()
 }
@@ -309,9 +308,8 @@ CloseSettings(decision := "") {
     CancelRecording()
     if !ConfirmLeaveSettings(decision, "关闭")
         return false
-    SetTimer(ManagerHint, 0)
-    ToolTip()
-    WT.hoverControl := 0, WT.hoverSince := 0
+    SetTimer(SettingsHint, 0)
+    UpdateSettingsHover(0)
     WT.settings.Hide()
     return true
 }
@@ -342,6 +340,14 @@ ConfirmLeaveSettings(decision := "", action := "退出") {
     return true
 }
 
+ActivateKeyField(c, *) {
+    global WT
+    if WT.recorder && WT.recorder.control = c
+        CancelRecording()
+    else
+        StartRecording(c)
+}
+
 StartRecording(c, *) {
     global WT
     CancelRecording()
@@ -365,7 +371,8 @@ StartRecording(c, *) {
         }
     }
     WT.recorder := {hook: ih, control: c, down: down}
-    WT.keyStatus.Text := "正在录制：请按组合键。Esc 取消，15 秒后自动取消。"
+    WT.keyStatus.Text := "Esc 取消 · 15 秒超时"
+    RefreshKeyStates()
     ih.Start()
     SetTimer(WatchRecording, 100)
 }
@@ -388,16 +395,14 @@ RecordKey(ih, vk, sc) {
             : (modifierVK = 0x12 || modifierVK = 0xA4 || modifierVK = 0xA5) ? 1
             : (modifierVK = 0x10 || modifierVK = 0xA0 || modifierVK = 0xA1) ? 4 : 8
     if !modifiers {
-        WT.keyStatus.Text := "需要带 Ctrl / Alt / Shift / Win，请继续录制。"
+        WT.keyStatus.Text := "请加入 Ctrl / Alt / Shift / Win"
         return
     }
     c := WT.recorder.control
     c.key := KeyFromVK(modifiers, vk)
     c.enabled.Value := true
-    c.display.Value := KeyLabel(c.key)
     CancelRecording()
-    RefreshKeyStates()
-    WT.keyStatus.Text := "已录入 " KeyLabel(c.key) "，点击应用后生效。"
+    WT.keyStatus.Text := HasUnsavedSettings() ? "有未应用的修改" : "快捷键未变化"
 }
 
 RecordKeyUp(ih, vk, sc) {
@@ -412,7 +417,8 @@ RecordingEnded(ih) {
         WT.recorder := 0
         SetTimer(WatchRecording, 0)
         SetTimer(ResumeHooks, 50)
-        WT.keyStatus.Text := "录制已结束，未修改快捷键。"
+        RefreshKeyStates()
+        WT.keyStatus.Text := "录制已结束，未修改"
     }
 }
 
@@ -424,6 +430,8 @@ CancelRecording() {
         SetTimer(WatchRecording, 0)
         ih.Stop()
         SetTimer(ResumeHooks, 50)
+        RefreshKeyStates()
+        WT.keyStatus.Text := HasUnsavedSettings() ? "有未应用的修改" : ""
     }
 }
 
@@ -431,7 +439,7 @@ WatchRecording() {
     global WT
     if WT.recorder && (!WT.settings || !WinActive("ahk_id " WT.settings.Hwnd)) {
         CancelRecording()
-        WT.keyStatus.Text := "已离开设置窗口，录制自动取消。"
+        WT.keyStatus.Text := "失去焦点，录制已取消"
     }
 }
 

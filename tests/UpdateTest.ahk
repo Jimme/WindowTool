@@ -3,8 +3,7 @@
 #Requires AutoHotkey v2.0
 #Include ../Updates.ahk
 g := Gui()
-global WT := {version: "0.0.0", updateButton: g.AddButton(, "检查更新"),
-    releaseButton: g.AddButton(, "发布页"), updateStatus: g.AddText("w500", "")}
+global WT := {version: "0.0.0", updateButton: g.AddButton(, "检查更新"), updateStatus: g.AddText("w500", "")}
 output := A_ScriptDir "\update-results.txt"
 try {
     for pair in [["0.1.3", "0.1.2"], ["0.1.10", "0.1.9"], ["0.2.0", "0.1.99"], ["1.0.0", "0.99.99"]]

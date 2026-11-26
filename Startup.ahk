@@ -175,13 +175,18 @@ RefreshStartup(resetChoice := false) {
             note := "源码模式只读；请从安装的 EXE 设置。"
             WT.startupDetails .= "`r`n源码运行模式仅查看；请从正式安装的 EXE 设置。"
         }
-        WT.startupStatus.Text := status "`n" note
+        WT.startupStatus.Text := status
+        WT.startupNote.Text := WT.startupRepair.Enabled ? "修复立即生效，可能需要管理员授权。`n" note : note
+        WT.startupWarning := task && issues != ""
     } catch Error as e {
-        WT.startupStatus.Text := "无法读取登录启动状态`n请到“状态与诊断”查看详细原因。"
+        WT.startupStatus.Text := "无法读取登录启动状态"
+        WT.startupNote.Text := "请到“状态与诊断”查看详细原因。"
         WT.startupDetails := "无法读取自启动状态：" e.Message
+        WT.startupWarning := true
         WT.startupEnable.Enabled := false
         WT.startupRepair.Enabled := false
     }
+    UpdateStartupStatusColor()
 }
 
 SyncStartupChoice(enabled, resetChoice := false) {

@@ -17,9 +17,10 @@ WindowTool/
 ├── Hotkeys.ahk
 ├── TrayManager.ahk
 ├── Settings.ahk
+├── SettingsAppearance.ahk
 ├── Startup.ahk
 ├── Updates.ahk
-├── docs/
+├── docs/                  # 含 RPD 和 ui-reference/
 ├── scripts/
 ├── tests/                 # 仅测试源码
 └── third-party/           # 第三方许可文本

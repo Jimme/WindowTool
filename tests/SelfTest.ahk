@@ -336,13 +336,54 @@ RunSelfTests() {
         WT.processOption.Value := true, WT.timeOption.Value := true
         Assert(ApplySettings(true) && !DllCall("IsWindowVisible", "Ptr", WT.settings.Hwnd),
             "确定应用后关闭设置", results)
+        footerAligned := true
+        for page in [1, 2, 3, 4, 5] {
+            OpenSettings(page - 1)
+            WT.settings.GetClientPos(,, &width, &height)
+            config := page = 2 || page = 3
+            row := config ? WT.configButtons.Clone() : [WT.closeButton]
+            if config || page = 4
+                row.Push(WT.keyStatus)
+            if page = 1
+                row.Push(WT.summary, WT.restoreSelectedButton, WT.restoreAllButton)
+            footerAligned := footerAligned && width = 528 && height = [304, 284, 416, 292, 232][page]
+            for member in row {
+                member.GetPos(, &rowY, , &rowHeight)
+                footerAligned := footerAligned && member.Visible && height - rowY = 39 && rowHeight = 24
+            }
+        }
+        Assert(footerAligned, "五页页脚共享上下内边距，按钮和状态行对齐", results)
         OpenSettings(2)
+        firstKey := WT.controls[1]
+        lastKey := WT.controls[10]
+        WT.settings.GetClientPos(,, &clientWidth, &clientHeight)
+        lastKey.display.GetPos(, &lastY, , &rowHeight)
+        WT.winF11Option.GetPos(, &compatY)
+        Assert(clientWidth = 528 && clientHeight = 416 && lastY + rowHeight < compatY,
+            "十项快捷键及兼容选项同屏且互不重叠", results)
+        SendMessage(0xF5, 0, 0, firstKey.display.Hwnd)
+        Sleep(80)
+        Assert(WT.recorder && WT.recorder.control = firstKey && firstKey.state.Text = "录制中",
+            "点击原生键位框开始录制", results)
+        CancelRecording()
+        settingsWindow := "ahk_id " WT.settings.Hwnd
+        WinActivate(settingsWindow)
+        Assert(WinWaitActive(settingsWindow, , 2), "激活设置窗口进行键盘验证", results)
+        firstKey.display.Focus()
+        Sleep(80)
+        SendEvent("{Space down}")
+        Sleep(40)
+        SendEvent("{Space up}")
+        Sleep(80)
+        Assert(WT.recorder && WT.recorder.control = firstKey, "键盘聚焦后按空格开始录制", results)
+        CancelRecording()
+        Assert(firstKey.state.Text != "录制中", "取消录制后还原键位框和状态", results)
         ResetSettingsPage()
         Assert(WT.controls[5].key = "#F11" && WT.xboxSettings.Visible && !WT.winF11Option.Value,
             "恢复默认使用 Win+F11 并显示 Xbox 设置入口", results)
         WT.controls[5].enabled.Value := false
         RefreshKeyStates()
-        Assert(!WT.xboxSettings.Visible && WT.keyHelp.Visible, "停用 Win+F11 后隐藏 Xbox 设置入口", results)
+        Assert(!WT.xboxSettings.Visible && WT.controls[1].display.Visible, "停用 Win+F11 后隐藏 Xbox 设置入口", results)
         xboxKeys := TestKeys(), xboxKeys[6] := "#vk7A"
         FillSettings(xboxKeys)
         Assert(WT.xboxSettings.Visible && WT.winF11Option.Visible, "识别其他功能的 Win+F11 键位", results)
@@ -351,13 +392,21 @@ RunSelfTests() {
         OpenSettings(2)
         Assert(WT.xboxSettings.Visible, "切回快捷键页恢复 Xbox 设置入口", results)
         FillSettings(WT.configuredKeys)
-        Assert(!WT.xboxSettings.Visible && WT.keyHelp.Visible, "其他组合继续显示常规录制提示", results)
+        Assert(!WT.xboxSettings.Visible && WT.controls[1].display.Visible, "其他组合不隐藏键位框", results)
         WT.startupEnable.Enabled := false
         ownsWinF11 := DllCall("RegisterHotKey", "Ptr", blocker.Hwnd, "Int", 903, "UInt", 8, "UInt", 0x7A)
         Assert(ownsWinF11 || A_LastError = 1409, "准备 Win+F11 占用", results)
         StartKeys(xboxKeys)
         FillSettings(WT.configuredKeys)
         Assert(WT.keyErrors.Has(6) && !WT.winF11Hook, "普通注册保留 Win+F11 冲突", results)
+        WT.timeOption.Value := !WT.showTime
+        OpenSettings(3)
+        Assert(WT.locateConflict.Enabled && InStr(WT.diagnosticValues[2].Text, "Win+F11"),
+            "诊断概况显示实际快捷键冲突", results)
+        LocateShortcutConflict()
+        Assert(WT.tabs.Value = 3 && DllCall("GetFocus", "Ptr") = WT.controls[6].display.Hwnd
+            && WT.timeOption.Value != WT.showTime, "定位冲突聚焦实际键位并保留待应用设置", results)
+        WT.timeOption.Value := WT.showTime
         WT.winF11Option.Value := true
         Assert(HasUnsavedSettings() && ConfirmLeaveSettings("Discard") && !WT.winF11Option.Value,
             "取消兼容模式编辑保留原值", results)
@@ -467,13 +516,37 @@ RunSelfTests() {
         WT.keyStatus.Text := "快捷键页测试提示"
         OpenSettings(3)
         Assert(!InStr(WT.keyStatus.Text, "快捷键页测试提示"), "诊断页不沿用配置页提示", results)
+        WT.settings.GetClientPos(,, &width, &height)
+        Assert(width = 528 && height = 292 && WT.diagnosticValues[1].Visible && !WT.diagnostics.Visible,
+            "诊断页采用紧凑客户区并默认展示概况", results)
+        WT.diagnosticTabs.Value := 2
+        ShowDiagnosticView()
+        SendMessage(0xB1, 0, 2, WT.diagnostics.Hwnd)
+        Assert(WT.diagnostics.Visible && !WT.diagnosticValues[1].Visible
+            && SendMessage(0xB0, 0, 0, WT.diagnostics.Hwnd) = 0x20000
+            && InStr(WT.diagnostics.Value, WT.log), "详细信息可选取且保留实际日志路径", results)
         OpenSettings(2)
+        Assert(!WT.diagnosticTabs.Visible && !WT.diagnostics.Visible, "离开诊断页隐藏二级控件", results)
         Assert(WT.keyStatus.Text = "快捷键页测试提示", "切回页面保留本页提示", results)
-        SetReleasePageAvailable(true)
-        Assert(!WT.releaseButton.Visible, "其他页不显示异步更新完成后的发布页按钮", results)
+        Assert(!WT.releaseButton.Visible, "其他页隐藏关于页的发布页按钮", results)
         OpenSettings(4)
-        Assert(WT.releaseButton.Visible, "切回关于页显示已有发布页入口", results)
-        SetReleasePageAvailable(false)
+        WT.updateButton.GetPos(&updateX, &updateY)
+        WT.releaseButton.GetPos(&releaseX, &releaseY)
+        WT.updateStatus.GetPos(, &feedbackY)
+        Assert(WT.releaseButton.Visible && updateY = releaseY && updateX < releaseX && feedbackY > releaseY,
+            "检查前已并排显示更新和发布页按钮，反馈在下方", results)
+        WT.settings.GetClientPos(,, &width, &height)
+        Assert(width = 528 && height = 232 && WT.updateButton.Visible, "关于页采用紧凑客户区并保留更新入口", results)
+        WT.updateRequest := {Status: 200, ResponseText: '{"tag_name":"v9.9.9"}'}
+        FinishUpdateCheck()
+        Assert(InStr(WT.updateStatus.Text, "9.9.9") && WT.releaseButton.Visible && WT.updateButton.Enabled,
+            "手动更新的异步完成状态保留文本与发布页", results)
+        FinishUpdateCheck("测试网络失败")
+        WT.updateButton.GetPos(&finalUpdateX, &finalUpdateY)
+        WT.releaseButton.GetPos(&finalReleaseX, &finalReleaseY)
+        Assert(WT.releaseButton.Visible && WT.updateButton.Enabled && WT.updateStatus.Text = "测试网络失败"
+            && finalUpdateX = updateX && finalUpdateY = updateY && finalReleaseX = releaseX && finalReleaseY = releaseY,
+            "更新失败保留发布页入口及按钮位置", results)
         ShowLicense()
         Assert(StrLen(WT.licenseGui["Edit1"].Value) > 1000, "内置许可证可独立查看", results)
         WT.licenseGui.Hide()
@@ -524,7 +597,7 @@ RunSelfTests() {
             DllCall("GetWindowRect", "Ptr", WT.tabs.Hwnd, "Ptr", navRect)
             DllCall("GetWindowRect", "Ptr", WT.settingsPane.Hwnd, "Ptr", paneRect)
             frameAligned := frameAligned && NumGet(navRect, 12, "Int") = NumGet(paneRect, 4, "Int")
-                && NumGet(paneRect, 12, "Int") - NumGet(paneRect, 4, "Int") = SettingsScale(page = 0 ? 259 : 376)
+                && NumGet(paneRect, 12, "Int") - NumGet(paneRect, 4, "Int") = SettingsScale([259, 239, 371, 247, 187][page + 1])
         }
         Assert(frameAligned, "反复切换五页时标签与页框相接且页框高度同步", results)
         settingsTarget := "ahk_id " WT.settings.Hwnd
@@ -726,18 +799,8 @@ PreviewTools() {
         IniWrite(keys[i], WT.ini, "Hotkeys", action.name)
     InitManager()
     ShowManager()
-    ShowSettings()
-    ShowManager()
-    SetTimer(PreviewState, 250)
     SetTimer((*) => ExitApp(), -180000)
     Persistent()
-}
-
-PreviewState() {
-    global WT
-    FileOpen(A_ScriptDir "\tests\preview-state.txt", "w", "UTF-8").Write(
-        "windows=" WT.windows.Count " caps=" GetKeyState("CapsLock", "T")
-        . " recording=" (WT.recorder ? 1 : 0))
 }
 
 RunCrashHost(hwnd) {

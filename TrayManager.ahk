@@ -446,39 +446,73 @@ RestoreSelected() {
     }
 }
 
-CloseManager() {
-    CloseSettings()
-}
-
-ManagerHint() {
+SettingsHint() {
     global WT
     MouseGetPos(, , &window, &control, 2)
-    if window != WT.gui.Hwnd || !WT.managerHints.Has(control) {
-        if WT.hoverControl {
-            ToolTip()
-            WT.hoverControl := 0
-        }
+    if window != WT.settings.Hwnd {
+        UpdateSettingsHover(0)
         return
     }
     if control != WT.hoverControl {
-        ToolTip()
-        WT.hoverControl := control, WT.hoverSince := A_TickCount
+        UpdateSettingsHover(control)
         return
     }
     if WT.hoverSince = 0 || A_TickCount - WT.hoverSince < 500
         return
-    switch WT.managerHints[control] {
-        case "list":
-            text := "双击恢复窗口；无响应时保留记录，可稍后重试。"
-        case "selected":
-            text := "恢复列表中选中的窗口；也可双击该行。"
-        case "all":
-            text := "恢复所有已收起的窗口。`n快捷键：" KeyLabel(WT.keys[7])
-        case "settings":
-            text := "自定义快捷键、启动和界面选项。`n快捷键：" KeyLabel(WT.keys[8])
+    text := ""
+    if WT.tabs.Value = 1 && WT.managerHints.Has(control)
+        text := ManagerHint(WT.managerHints[control])
+    else if control = WT.keyStatus.Hwnd
+        text := WT.keyStatus.Text
+    else if control = WT.updateStatus.Hwnd
+        text := WT.updateStatus.Text
+    else if control = WT.winF11Option.Hwnd
+        text := "兼容模式可能拦截 Xbox 快捷键。键盘钩子冲突可能无法检测。"
+    else if WT.keyHints.Has(control) {
+        c := WT.keyHints[control]
+        if control = c.display.Hwnd {
+            text := c.state.Text = "录制中" ? "按带 Ctrl、Alt、Shift 或 Win 的组合键。Esc 或再次点击可取消。"
+                : "点击或按空格开始录制快捷键。"
+            if c.key != "" && c.state.Text != "录制中"
+                text := KeyLabel(c.key) "`n" text
+        } else if c.state.Text = "运行中"
+            text := "快捷键已生效"
+    } else if WT.tabs.Value = 4 {
+        for value in WT.diagnosticValues {
+            if control = value.Hwnd {
+                text := value.Text
+                break
+            }
+        }
     }
-    ToolTip(text)
+    if text != ""
+        ToolTip(text)
     WT.hoverSince := 0
+}
+
+UpdateSettingsHover(control) {
+    global WT
+    previous := WT.hoverControl
+    if control = previous
+        return
+    ToolTip()
+    WT.hoverControl := control, WT.hoverSince := control ? A_TickCount : 0
+    for hwnd in [previous, control] {
+        if WT.keyHints.Has(hwnd) && hwnd = WT.keyHints[hwnd].display.Hwnd
+            InvalidateSettingsControl(hwnd)
+    }
+}
+
+ManagerHint(target) {
+    global WT
+    switch target {
+        case "list":
+            return "双击恢复窗口；无响应时保留记录，可稍后重试。"
+        case "selected":
+            return "恢复列表中选中的窗口；也可双击该行。"
+        case "all":
+            return "恢复所有已收起的窗口。`n快捷键：" KeyLabel(WT.keys[7])
+    }
 }
 
 UpdateSummary() {

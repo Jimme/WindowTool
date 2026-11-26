@@ -6,7 +6,6 @@ CheckForUpdates(*) {
     if HasProp(WT, "updateRequest") && WT.updateRequest
         return
     WT.updateButton.Enabled := false
-    SetReleasePageAvailable(false)
     WT.updateStatus.Text := "正在检查…"
     WT.updateRequest := 0
     try {
@@ -102,13 +101,6 @@ FinishUpdateCheck(errorText := "") {
     try request.Abort()
     WT.updateButton.Enabled := true
     WT.updateStatus.Text := text
-    SetReleasePageAvailable(true)
-}
-
-SetReleasePageAvailable(available) {
-    global WT
-    WT.releasePageAvailable := available
-    WT.releaseButton.Visible := available && (!WT.HasOwnProp("tabs") || WT.tabs.Value = 5)
 }
 
 UpdateHttpError(request) {

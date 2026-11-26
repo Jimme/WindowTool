@@ -5,11 +5,9 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
-$entryText = Get-Content -LiteralPath (Join-Path $projectRoot 'WindowTool.ahk') -Raw
 . (Join-Path $PSScriptRoot 'build-inputs.ps1')
 $releaseVersion = Get-ProjectVersion $projectRoot
 $releaseDirectory = Join-Path $projectRoot "release\$releaseVersion"
-. (Join-Path $PSScriptRoot 'build-inputs.ps1')
 . (Join-Path $PSScriptRoot 'release-files.ps1')
 Assert-BuildInputs $projectRoot $releaseDirectory
 $sourceDirectory = Join-Path $releaseDirectory 'sources'
