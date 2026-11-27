@@ -30,6 +30,9 @@ if ($Compiled) {
 $previousRuntime = $env:WINDOWTOOL_AHK
 try {
     $env:WINDOWTOOL_AHK = $AhkPath
+    if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+        Remove-Item -LiteralPath $resultPath -ErrorAction Stop
+    }
     $testProcess = Start-Process -FilePath $programPath -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru `
         -RedirectStandardOutput (Join-Path $checkDirectory 'stdout.txt') `
         -RedirectStandardError (Join-Path $checkDirectory 'stderr.txt')
@@ -40,7 +43,7 @@ try {
         throw "Tests failed with exit code $($testProcess.ExitCode)."
     }
     $status = if (Test-Path -LiteralPath $resultPath) { [string](Get-Content -LiteralPath $resultPath -First 1) }
-    if ($status -notmatch '^PASS \d+ checks$') {
+    if (!$status -or $status -notmatch '^PASS \d+ checks$') {
         throw 'Test process returned without a PASS result.'
     }
     Get-Content -LiteralPath $resultPath

@@ -166,7 +166,7 @@ RefreshStartup(resetChoice := false) {
         }
         SyncStartupChoice(!!task && task.Enabled, resetChoice)
         WT.startupEnable.Enabled := A_IsCompiled && !StartupIsPreview()
-        WT.startupRepair.Enabled := A_IsCompiled && !StartupIsPreview()
+        WT.startupRepair.Enabled := WT.startupEnable.Enabled && !!task && issues != ""
         if StartupIsPreview() {
             note := "预览模式只读，不会修改正式自启动。"
             WT.startupDetails .= "`r`n预览模式禁止修改正式自启动。"
@@ -176,7 +176,7 @@ RefreshStartup(resetChoice := false) {
             WT.startupDetails .= "`r`n源码运行模式仅查看；请从正式安装的 EXE 设置。"
         }
         WT.startupStatus.Text := status
-        WT.startupNote.Text := WT.startupRepair.Enabled ? "修复立即生效，可能需要管理员授权。`n" note : note
+        WT.startupNote.Text := WT.startupRepair.Enabled ? "修复将立即启用自启，可能需要管理员授权。`n" note : note
         WT.startupWarning := task && issues != ""
     } catch Error as e {
         WT.startupStatus.Text := "无法读取登录启动状态"
@@ -187,6 +187,8 @@ RefreshStartup(resetChoice := false) {
         WT.startupRepair.Enabled := false
     }
     UpdateStartupStatusColor()
+    WT.startupRepair.Visible := WT.tabs.Value = 2 && WT.startupRepair.Enabled
+    WT.configButtons[4].Enabled := HasUnsavedSettings()
 }
 
 SyncStartupChoice(enabled, resetChoice := false) {
@@ -222,7 +224,7 @@ ChangeStartup(enable) {
         WT.activeIssues["startup"] := WT.lastError
         MsgBox(WT.lastError, "WindowTool", "Icon!")
     }
-    RefreshStartup(true)
+    RefreshStartup(ok)
     UpdateSummary()
     return ok
 }

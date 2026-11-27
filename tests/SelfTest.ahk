@@ -243,7 +243,7 @@ RunSelfTests() {
             "正常退出恢复窗口", results)
         WT.keys := TestKeys()
         ShowStartup()
-        Assert(WT.startupStatus.Text != "" && !WT.startupEnable.Enabled && !WT.startupRepair.Enabled,
+        Assert(WT.startupStatus.Text != "" && !WT.startupEnable.Enabled && !WT.startupRepair.Enabled && !WT.startupRepair.Visible,
             "自启动状态界面及源码模式限制", results)
         WT.settings.Hide()
         ShowSettings()
@@ -257,11 +257,16 @@ RunSelfTests() {
         Assert(InStr(StartupIssues(definition, path), "触发器"), "识别已停用登录触发器", results)
         definition.Actions.Item(1).Path := A_ScriptDir "\does-not-exist.exe"
         Assert(InStr(StartupIssues(definition, path), "不存在"), "识别失效自启路径", results)
+        OpenSettings(2)
+        settingsWindow := "ahk_id " WT.settings.Hwnd
+        WinActivate(settingsWindow)
+        Assert(WinWaitActive(settingsWindow,,2), "设置页处于前台后验证录制", results)
         c := WT.controls[1]
+        c.display.Focus()
         StartRecording(c)
         ih := WT.recorder.hook
         RecordKey(ih, 0xA2, 0), RecordKey(ih, 0xA0, 0), RecordKey(ih, 9, 0)
-        Assert(c.key = "^+Tab" && !WT.recorder, "录制 Tab 不触发焦点导航", results)
+        Assert(c.key = "^+Tab" && !WT.recorder, "解析 Ctrl+Shift+Tab 并结束录制", results)
         StartRecording(c)
         ih := WT.recorder.hook
         RecordKey(ih, 0xA2, 0), RecordKey(ih, 0xA4, 0), RecordKey(ih, 0x14, 0)
@@ -376,6 +381,12 @@ RunSelfTests() {
         SendEvent("{Space up}")
         Sleep(80)
         Assert(WT.recorder && WT.recorder.control = firstKey, "键盘聚焦后按空格开始录制", results)
+        SendLevel(1)
+        try SendEvent("^+{Tab}")
+        finally SendLevel(0)
+        Sleep(100)
+        Assert(firstKey.key = "^+Tab" && !WT.recorder && DllCall("GetFocus", "Ptr") = firstKey.display.Hwnd,
+            "前台录制 Ctrl+Shift+Tab 并保持键位框焦点", results)
         CancelRecording()
         Assert(firstKey.state.Text != "录制中", "取消录制后还原键位框和状态", results)
         ResetSettingsPage()
@@ -399,13 +410,15 @@ RunSelfTests() {
         StartKeys(xboxKeys)
         FillSettings(WT.configuredKeys)
         Assert(WT.keyErrors.Has(6) && !WT.winF11Hook, "普通注册保留 Win+F11 冲突", results)
+        Assert(WT.controls[6].help.Visible && !WT.controls[6].state.Visible,
+            "被占用的 Win+F11 在对应操作行提供原生帮助按钮", results)
         WT.timeOption.Value := !WT.showTime
         OpenSettings(3)
         Assert(WT.locateConflict.Enabled && InStr(WT.diagnosticValues[2].Text, "Win+F11"),
             "诊断概况显示实际快捷键冲突", results)
         LocateShortcutConflict()
         Assert(WT.tabs.Value = 3 && DllCall("GetFocus", "Ptr") = WT.controls[6].display.Hwnd
-            && WT.timeOption.Value != WT.showTime, "定位冲突聚焦实际键位并保留待应用设置", results)
+            && WT.timeOption.Value != WT.showTime && WT.configButtons[4].Enabled, "定位冲突聚焦实际键位并保留待应用设置", results)
         WT.timeOption.Value := WT.showTime
         WT.winF11Option.Value := true
         Assert(HasUnsavedSettings() && ConfirmLeaveSettings("Discard") && !WT.winF11Option.Value,
@@ -426,11 +439,13 @@ RunSelfTests() {
         WT.winF11Option.Value := false
         Assert(!ApplySettings() && WT.winF11Hook && WT.bindings["8:122"].hook = "$#F11",
             "关闭兼容模式写入失败时保留原钩子", results)
+        Assert(WT.configButtons[4].Enabled, "写入失败保留可重试的应用按钮", results)
         WT.ini := originalIni
         WT.winF11Option.Value := false
         Assert(ApplySettings() && !WT.bindings.Has("8:122") && WT.keyErrors.Has(6)
             && LoadKeys()[6] = "#vk7A" && IniRead(WT.ini, "Hotkeys", "WinF11Compatibility") = "0",
             "关闭兼容模式后保留被占用的 Win+F11 配置", results)
+        Assert(!WT.configButtons[4].Enabled, "保存后应用按钮恢复禁用", results)
         if ownsWinF11
             DllCall("UnregisterHotKey", "Ptr", blocker.Hwnd, "Int", 903)
         WT.winF11Option.Value := true
@@ -600,6 +615,21 @@ RunSelfTests() {
                 && NumGet(paneRect, 12, "Int") - NumGet(paneRect, 4, "Int") = SettingsScale([259, 239, 371, 247, 187][page + 1])
         }
         Assert(frameAligned, "反复切换五页时标签与页框相接且页框高度同步", results)
+        OpenSettings(2)
+        WT.settings.Show("w460 h275")
+        LayoutSettingsViewport()
+        Assert(WT.viewport.maxY > 0 && WT.viewport.maxX > 0, "窄矮客户区启用双向滚动", results)
+        WT.configButtons[4].GetPos(,&fixedY)
+        SettingsScroll(7,0,0x115,WT.settings.Hwnd)
+        WT.winF11Option.GetPos(,&compactY,,&compactH)
+        WT.configButtons[4].GetPos(,&footerY)
+        Assert(compactY >= WTSettingsLayout.frameTop && compactY+compactH <= footerY && fixedY = footerY,
+            "滚到兼容选项时页脚保持可达", results)
+        WT.controls[1].display.Focus()
+        RevealSettingsFocus()
+        WT.controls[1].display.GetPos(,&firstY)
+        Assert(firstY >= WTSettingsLayout.frameTop, "键盘焦点带动小工作区内容回滚", results)
+        OpenSettings(0)
         settingsTarget := "ahk_id " WT.settings.Hwnd
         WinGetPos(&originalX, &originalY,,, settingsTarget)
         if GetWorkArea(WT.settings.Hwnd, &areaL, &areaT, &areaR, &areaB) {

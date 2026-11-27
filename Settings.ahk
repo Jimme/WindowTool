@@ -53,9 +53,13 @@ OpenSettings(page := 1) {
         WT.settings := g, WT.tabs := tabs
         DllCall("SetWindowPos", "Ptr", WT.settingsPane.Hwnd, "Ptr", 1, "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x13)
         OnMessage(0x0232, SettingsSizingDone)
+        OnMessage(0x114, SettingsScroll)
+        OnMessage(0x115, SettingsScroll)
+        OnMessage(0x20A, SettingsWheel)
         WT.pageMessages := Map(), WT.statusPage := 0
     }
     ; 已打开时保留尚未应用的编辑。
+    ResetSettingsViewport()
     if !DllCall("IsWindowVisible", "Ptr", WT.settings.Hwnd) {
         CancelRecording()
         FillSettings(WT.configuredKeys.Length ? WT.configuredKeys : WT.keys)
@@ -68,7 +72,6 @@ OpenSettings(page := 1) {
     }
     WT.tabs.Value := page + 1
     UpdateSettingsFooter()
-    RefreshKeyStates()
     RefreshDiagnostics()
     RefreshManager()
     ShowSettingsLayout()
@@ -78,11 +81,11 @@ CreateGeneralPage(g) {
     global WT
     AddSettingsGroup(g, "x17 y46 w494 h84", "登录启动")
     WT.startupEnable := g.AddCheckbox("x29 y61 w247 h21", "登录时以管理员身份启动")
-    WT.startupStatus := g.AddText("x284 y61 w216 h21 +0x200", "")
+    WT.startupStatus := g.AddText("x278 y61 w136 h21 +0x200", "")
     g.AddButton("x29 y90 w78 h24", "重新检测").OnEvent("Click", (*) => RefreshStartup())
-    WT.startupRepair := g.AddButton("x115 y90 w142 h24", "启用并修复自启")
+    WT.startupRepair := g.AddButton("x417 y60 w83 h24 Hidden", "立即修复")
     WT.startupRepair.OnEvent("Click", (*) => (ChangeStartup(true), SettingsOptionChanged()))
-    WT.startupNote := g.AddText("x269 y88 w231 h34", "")
+    WT.startupNote := g.AddText("x118 y88 w382 h34", "")
     AddSettingsGroup(g, "x17 y137 w494 h45", "窗口列表")
     WT.processOption := g.AddCheckbox("x29 y152 w178 h22", "显示所属程序")
     WT.timeOption := g.AddCheckbox("x215 y152 w178 h22", "显示收起时间")
@@ -112,7 +115,9 @@ CreateHotkeyPage(g) {
         enabled := g.AddCheckbox("x20 y" y " w150 h21", Actions()[i].label)
         display := g.AddButton("x177 y" y " w215 h21", "未设置")
         state := g.AddText("x407 y" y " w100 h21 +0x300", "")
-        c := {enabled: enabled, display: display, state: state, key: ""}
+        help := g.AddButton("x403 y" y " w108 h21 Hidden", "Win+F11 被占用")
+        help.OnEvent("Click", ShowXboxShortcutHelp)
+        c := {enabled: enabled, display: display, state: state, help: help, key: ""}
         WT.controls[i] := c
         WT.keyHints[display.Hwnd] := c, WT.keyHints[state.Hwnd] := c
         SubclassSettingsControl(display, 4, i)
@@ -215,6 +220,8 @@ ShowSettingsPageControls() {
     }
     if WT.tabs.Value = 4
         ShowDiagnosticView()
+    WT.startupRepair.Visible := WT.tabs.Value = 2 && WT.startupRepair.Enabled
+    RefreshKeyStates()
     UpdateManagerEmpty()
 }
 
@@ -229,10 +236,9 @@ ShowSettingsLayout(activate := true) {
     height := WTSettingsLayout.pageHeights[WT.tabs.Value]
     WT.settings.Show("w528 h" height position (activate ? "" : " NA"))
     WT.settingsPlaced := true
-    FitSettingsToWorkArea()
-    SizeSettingsFrame(SettingsFrameBottom(WT.tabs.Value) - WTSettingsLayout.frameTop)
     ; 先按目标页面定尺寸，再显示该页控件，防止原生控件在旧布局中重绘。
     ShowSettingsPageControls()
+    FitSettingsToWorkArea()
     ; 尺寸和可见性全部就绪后，重画父窗口与子控件，清除旧尺寸留下的像素。
     DllCall("RedrawWindow", "Ptr", WT.settings.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x185)
 }
@@ -248,12 +254,144 @@ FitSettingsToWorkArea() {
     if !IsSet(WT) || !WT.settings || !DllCall("IsWindowVisible", "Ptr", WT.settings.Hwnd)
         return
     hwnd := WT.settings.Hwnd, target := "ahk_id " hwnd
-    WinGetPos(&x, &y, &width, &height, target)
+    ResetSettingsViewport()
+    WT.settings.GetClientPos(,, &clientW, &clientH)
+    WinGetPos(&x, &y, &currentWidth, &currentHeight, target)
+    width := currentWidth + SettingsScale(528 - clientW)
+    height := currentHeight + SettingsScale(WTSettingsLayout.pageHeights[WT.tabs.Value] - clientH)
     if GetWorkArea(hwnd, &left, &top, &right, &bottom) {
+        ; 只缺高度时给垂直滚动条留宽，避免无谓增加横向滚动。
+        if height > bottom - top
+            width += DllCall("GetSystemMetrics", "Int", 2)
+        if width > right - left
+            height += DllCall("GetSystemMetrics", "Int", 3)
         fittedWidth := Min(width, right - left), fittedHeight := Min(height, bottom - top)
         fittedX := Min(Max(x, left), right - fittedWidth), fittedY := Min(Max(y, top), bottom - fittedHeight)
-        if fittedX != x || fittedY != y || fittedWidth != width || fittedHeight != height
+        if fittedX != x || fittedY != y || fittedWidth != currentWidth || fittedHeight != currentHeight
             WinMove(fittedX, fittedY, fittedWidth, fittedHeight, target)
+    }
+    LayoutSettingsViewport()
+}
+
+LayoutSettingsViewport() {
+    global WT
+    hwnd := WT.settings.Hwnd, page := WT.tabs.Value
+    height := WTSettingsLayout.pageHeights[page]
+    WT.settings.GetClientPos(,, &w, &h)
+    if w < 528 || h < height {
+        ; 一根滚动条可能使另一方向的空间也不足。
+        Loop 2 {
+            DllCall("ShowScrollBar", "Ptr", hwnd, "Int", 0, "Int", w < 528)
+            DllCall("ShowScrollBar", "Ptr", hwnd, "Int", 1, "Int", h < height)
+            WT.settings.GetClientPos(,, &w, &h)
+        }
+        items := []
+        for ctrl in WT.pageControls[page] {
+            footer := page = 1 && (ctrl = WT.restoreSelectedButton || ctrl = WT.restoreAllButton || ctrl = WT.summary)
+            items.Push(ViewportItem(ctrl, footer))
+        }
+        for ctrl in [WT.closeButton, WT.keyStatus, WT.configButtons*]
+            items.Push(ViewportItem(ctrl, true))
+        items.Push(ViewportItem(WT.tabs, false))
+        WT.viewport := {items: items, x: 0, y: 0, maxX: Max(0,528-w), maxY: Max(0,height-h),
+            h: h, page: page, focus: 0}
+        for axis, size in [528, height] {
+            visible := axis = 1 ? w : h
+            if visible >= size
+                continue
+            info := Buffer(28, 0)
+            NumPut("UInt", 28, "UInt", 7, "Int", 0, "Int", size-1, "UInt", visible, info)
+            DllCall("SetScrollInfo", "Ptr", hwnd, "Int", axis-1, "Ptr", info, "Int", true)
+        }
+        MoveSettingsViewport(0, 0)
+    }
+    SizeSettingsFrame(Max(1, Min(height,h) - WTSettingsLayout.frameBottomMargin - WTSettingsLayout.frameTop))
+}
+
+ViewportItem(ctrl, footer) {
+    ctrl.GetPos(&x, &y, &w, &h)
+    return {ctrl: ctrl, x: x, y: y, w: w, h: h, footer: footer}
+}
+
+ResetSettingsViewport() {
+    global WT
+    if !HasProp(WT, "viewport") || !WT.viewport
+        return
+    for item in WT.viewport.items {
+        item.ctrl.Move(item.x, item.y)
+        DllCall("SetWindowRgn", "Ptr", item.ctrl.Hwnd, "Ptr", 0, "Int", false)
+    }
+    WT.viewport := 0
+    DllCall("ShowScrollBar", "Ptr", WT.settings.Hwnd, "Int", 3, "Int", false)
+}
+
+MoveSettingsViewport(x, y) {
+    global WT
+    v := WT.viewport
+    v.x := Min(v.maxX, Max(0,x)), v.y := Min(v.maxY, Max(0,y))
+    top := WTSettingsLayout.frameTop, bottom := SettingsFooterTop(v.page) - v.maxY
+    for item in v.items {
+        cy := item.y - (item.footer ? v.maxY : item.ctrl = WT.tabs ? 0 : v.y)
+        item.ctrl.Move(item.x - v.x, cy)
+        if item.footer || item.ctrl = WT.tabs
+            continue
+        ; 区域交给系统持有，避免滚动的内容盖住标签与固定页脚。
+        start := Max(0,top-cy), end := Max(start,Min(item.h,bottom-cy))
+        region := DllCall("CreateRectRgn", "Int", 0, "Int", SettingsScale(start),
+            "Int", SettingsScale(item.w), "Int", SettingsScale(end), "Ptr")
+        if !DllCall("SetWindowRgn", "Ptr", item.ctrl.Hwnd, "Ptr", region, "Int", true)
+            DllCall("DeleteObject", "Ptr", region)
+    }
+    for axis, pos in [v.x,v.y]
+        DllCall("SetScrollPos", "Ptr", WT.settings.Hwnd, "Int", axis-1, "Int", pos, "Int", true)
+}
+
+SettingsScroll(wp, lp, msg, hwnd) {
+    global WT
+    if lp || !HasProp(WT, "viewport") || !WT.viewport || hwnd != WT.settings.Hwnd
+        return
+    v := WT.viewport, horizontal := msg = 0x114
+    pos := horizontal ? v.x : v.y, limit := horizontal ? v.maxX : v.maxY
+    step := horizontal ? 100 : Max(23,v.h-90)
+    switch wp & 0xFFFF {
+        case 0: pos -= 23
+        case 1: pos += 23
+        case 2: pos -= step
+        case 3: pos += step
+        case 4,5: pos := wp >> 16
+        case 6: pos := 0
+        case 7: pos := limit
+        default: return
+    }
+    MoveSettingsViewport(horizontal ? pos : v.x, horizontal ? v.y : pos)
+    return 0
+}
+
+SettingsWheel(wp, lp, msg, hwnd) {
+    global WT
+    if !HasProp(WT, "viewport") || !WT.viewport || !WT.viewport.maxY || hwnd != WT.settings.Hwnd
+        return
+    v := WT.viewport
+    MoveSettingsViewport(v.x, v.y + ((wp >> 16) & 0x8000 ? 46 : -46))
+    return 0
+}
+
+RevealSettingsFocus() {
+    global WT
+    if !HasProp(WT, "viewport") || !WT.viewport
+        return
+    v := WT.viewport, focus := DllCall("GetFocus", "Ptr")
+    if focus = v.focus
+        return
+    v.focus := focus
+    for item in v.items {
+        if item.ctrl.Hwnd != focus
+            continue
+        x := Min(item.x, Max(v.x,item.x + item.w - (528-v.maxX)))
+        y := item.footer || item.ctrl = WT.tabs ? v.y
+            : Min(item.y-WTSettingsLayout.frameTop, Max(v.y,item.y+item.h-SettingsFooterTop(v.page)+v.maxY))
+        MoveSettingsViewport(x,y)
+        break
     }
 }
 
@@ -305,9 +443,9 @@ PositionSettingsFooter(page, config) {
 
 SettingsTabChanged(*) {
     global WT
+    ResetSettingsViewport()
     CancelRecording()
     UpdateSettingsFooter()
-    RefreshKeyStates()
     if WT.tabs.Value = 4
         RefreshDiagnostics()
     ShowSettingsLayout(false)
@@ -318,6 +456,7 @@ RefreshKeyStates() {
     if !WT.settings
         return
     hotkeyPage := WT.tabs.Value = 3
+    WT.configButtons[4].Enabled := HasUnsavedSettings()
     xboxConflict := false
     for i, c in WT.controls {
         desired := c.enabled.Value ? c.key : ""
@@ -334,10 +473,15 @@ RefreshKeyStates() {
             InvalidateSettingsControl(c.display.Hwnd)
             InvalidateSettingsControl(c.state.Hwnd)
         }
-        if hotkeyPage && !xboxConflict && desired != "" {
+        isWinF11 := false
+        if hotkeyPage && desired != "" {
             ; 比较组合签名，也识别旧配置中使用 vk7A 的同一键位。
-            try xboxConflict := ParseKey(desired).signature = "8:122"
+            try isWinF11 := ParseKey(desired).signature = "8:122"
         }
+        xboxConflict := xboxConflict || isWinF11
+        occupied := isWinF11 && state = "冲突（已保留）" && InStr(WT.keyErrors[i], "Windows 错误 1409")
+        c.help.Visible := !!occupied
+        c.state.Visible := hotkeyPage && !occupied
     }
     WT.winF11Option.Visible := hotkeyPage
     WT.xboxSettings.Visible := xboxConflict
@@ -347,7 +491,7 @@ ShowXboxShortcutHelp(*) {
     global WT
     CancelRecording()
     answer := MsgBox(
-        "Win+F11 可进入或退出 Xbox 模式。若要保留这个键位给 WindowTool，可在 Windows 设置 → 游戏 → Xbox 模式关闭该功能。"
+        "Win+F11 可能被 Xbox 模式或其他程序占用。若设备启用了 Xbox 模式，可在 Windows 设置 → 游戏 → Xbox 模式关闭该功能。"
         . "`n`n普通电脑关闭「启用 Xbox 模式」。游戏掌机可把主页应用选为「无」。"
         . "`n`n关闭 Xbox 模式后若 Win+F11 仍被占用，可勾选「Win+F11 兼容模式」并应用。兼容模式可能优先于其他使用该键的软件。"
         . "`n`n现在打开 Windows 的 Xbox 模式设置？", "WindowTool", "OKCancel Iconi Owner" WT.settings.Hwnd)
@@ -363,8 +507,10 @@ ApplySettings(closeAfter := false) {
     WT.saveFailurePage := 2
     wantedStartup := WT.startupEnable.Value
     if !SaveSettings(WT.controls, WT.keyStatus, {process: WT.processOption.Value, time: WT.timeOption.Value},
-        !!WT.winF11Option.Value)
+        !!WT.winF11Option.Value) {
+        RefreshKeyStates()
         return false
+    }
     if WT.startupEnable.Enabled && wantedStartup != WT.startupBaseline {
         if !ChangeStartup(wantedStartup) {
             WT.saveFailurePage := 1
@@ -391,7 +537,7 @@ HasUnsavedSettings() {
     }
     return WT.processOption.Value != WT.showProcess || WT.timeOption.Value != WT.showTime
         || !!WT.winF11Option.Value != WT.winF11Hook
-        || (WT.startupEnable.Enabled && WT.startupEnable.Value != WT.startupBaseline)
+        || (WT.startupEnable.Enabled && HasProp(WT, "startupBaseline") && WT.startupEnable.Value != WT.startupBaseline)
 }
 
 ShowLicense(*) {

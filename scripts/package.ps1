@@ -6,7 +6,8 @@ param()
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 . (Join-Path $PSScriptRoot 'build-inputs.ps1')
-$releaseVersion = Get-ProjectVersion $projectRoot
+$versions = Get-ProjectVersionInfo $projectRoot
+$releaseVersion = $versions.Product
 $releaseDirectory = Join-Path $projectRoot "release\$releaseVersion"
 . (Join-Path $PSScriptRoot 'release-files.ps1')
 Assert-BuildInputs $projectRoot $releaseDirectory
@@ -24,9 +25,7 @@ if ($dirtyFiles.Count) { throw 'Commit the final source tree before packaging.' 
 $sourceCommit = & git -C $projectRoot rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Source commit missing.' }
 $binaryPath = Join-Path $releaseDirectory 'WindowTool.exe'
-if ((Get-Item -LiteralPath $binaryPath).VersionInfo.ProductVersion -ne $releaseVersion) {
-    throw 'Compiled version does not match the source version.'
-}
+Assert-ExecutableVersion $binaryPath $versions
 $binaryHash = (Get-FileHash -LiteralPath $binaryPath).Hash
 $sourceHash = (Get-FileHash -LiteralPath $runtimeSourcePath).Hash
 $manifest = @(

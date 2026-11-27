@@ -305,7 +305,8 @@ PaintSettingsPane(hwnd, dc) {
     else
         SettingsFill(dc, 1, 0, width - 1, 1, border)
     if WT.HasOwnProp("tabs") && (WT.tabs.Value = 2 || WT.tabs.Value = 3) {
-        y := SettingsScale(SettingsFooterTop(WT.tabs.Value) - WTSettingsLayout.frameTop)
+        offset := HasProp(WT, "viewport") && WT.viewport ? WT.viewport.maxY : 0
+        y := SettingsScale(SettingsFooterTop(WT.tabs.Value) - WTSettingsLayout.frameTop - offset)
         SettingsFill(dc, SettingsScale(9), y, width - SettingsScale(9), y + 1,
             WT.uiHighContrast ? border : WTColors.line)
     }

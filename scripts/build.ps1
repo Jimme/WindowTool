@@ -12,7 +12,8 @@ $projectRoot = Split-Path $PSScriptRoot -Parent
 $buildInputs = Get-BuildInputs $projectRoot
 $entryPath = Join-Path $projectRoot 'WindowTool.ahk'
 $runtimeText = Get-Content -LiteralPath (Join-Path $projectRoot 'TrayManager.ahk') -Raw
-$releaseVersion = Get-ProjectVersion $projectRoot
+$versions = Get-ProjectVersionInfo $projectRoot
+$releaseVersion = $versions.Product
 $runtimeVersion = [regex]::Match($runtimeText, 'version: "([^"]+)"').Groups[1].Value
 if ($runtimeVersion -ne $releaseVersion) { throw 'Compiler metadata and runtime version must match.' }
 foreach ($toolPath in @($AhkPath, $CompilerPath)) {
@@ -25,8 +26,7 @@ $arguments = @('/in', ('"{0}"' -f $entryPath), '/out', ('"{0}"' -f $outputPath),
     '/base', ('"{0}"' -f $AhkPath), '/compress', '0', '/silent', 'verbose')
 $compilerProcess = Start-Process -FilePath $CompilerPath -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
 if ($compilerProcess.ExitCode -ne 0 -or !(Test-Path -LiteralPath $outputPath)) { throw 'Build failed.' }
-$actualVersion = (Get-Item -LiteralPath $outputPath).VersionInfo.ProductVersion
-if ($actualVersion -ne $releaseVersion) { throw "Unexpected compiled version: $actualVersion" }
+Assert-ExecutableVersion $outputPath $versions
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination (Join-Path $releaseDirectory 'README.md')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $releaseDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $releaseDirectory -Recurse -Force
